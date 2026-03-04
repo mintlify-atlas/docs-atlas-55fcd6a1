@@ -1,0 +1,764 @@
+---
+title: Surveys
+description: Create interactive surveys to collect user input for job templates in AWX
+---
+
+Surveys provide a user-friendly way to collect input when launching job templates and workflow job templates. Instead of requiring users to write YAML/JSON extra variables, surveys present a form with validation.
+
+## Understanding Surveys
+
+A **Survey** is a set of questions presented to users before launching a job. Survey responses are:
+
+- Passed as extra variables to the playbook
+- Validated according to defined rules
+- Stored with job history
+- Can be required or optional
+- Support multiple input types
+
+### Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Application Deployment" icon="rocket">
+    Prompt for version, environment, branch
+  </Card>
+  
+  <Card title="Server Provisioning" icon="server">
+    Collect hostname, IP, region, size
+  </Card>
+  
+  <Card title="User Management" icon="user-plus">
+    Ask for username, email, groups
+  </Card>
+  
+  <Card title="Configuration Changes" icon="sliders">
+    Request service name, port, protocol
+  </Card>
+</CardGroup>
+
+## Survey Question Types
+
+<Tabs>
+  <Tab title="Text">
+    Free-form text input
+
+    ```yaml
+    type: text
+    question_name: Application Name
+    variable: app_name
+    required: true
+    default: myapp
+    min: 3
+    max: 50
+    ```
+
+    **Best for**: Names, URLs, paths
+  </Tab>
+
+  <Tab title="Password">
+    Sensitive text input (masked)
+
+    ```yaml
+    type: password
+    question_name: Database Password
+    variable: db_password
+    required: true
+    ```
+
+    **Best for**: Passwords, tokens, secrets
+    
+    <Note>Password values are encrypted in the database</Note>
+  </Tab>
+
+  <Tab title="Integer">
+    Whole number input
+
+    ```yaml
+    type: integer
+    question_name: Number of Instances
+    variable: instance_count
+    required: true
+    default: 1
+    min: 1
+    max: 10
+    ```
+
+    **Best for**: Counts, ports, IDs
+  </Tab>
+
+  <Tab title="Float">
+    Decimal number input
+
+    ```yaml
+    type: float
+    question_name: Memory Limit (GB)
+    variable: memory_gb
+    required: false
+    default: 2.5
+    min: 0.5
+    max: 64.0
+    ```
+
+    **Best for**: Percentages, resource limits, ratios
+  </Tab>
+
+  <Tab title="Multiple Choice">
+    Select one option from a list
+
+    ```yaml
+    type: multiplechoice
+    question_name: Environment
+    variable: environment
+    required: true
+    choices:
+      - dev
+      - staging
+      - production
+    default: dev
+    ```
+
+    **Best for**: Environments, regions, sizes
+  </Tab>
+
+  <Tab title="Multi-Select">
+    Select multiple options from a list
+
+    ```yaml
+    type: multiselect
+    question_name: Features to Enable
+    variable: features
+    required: false
+    choices:
+      - monitoring
+      - backup
+      - ssl
+      - cdn
+    default: "monitoring\nbackup"
+    ```
+
+    **Best for**: Tags, features, components
+    
+    <Note>Default uses newline-separated values</Note>
+  </Tab>
+</Tabs>
+
+## Creating a Survey
+
+<Steps>
+
+<Step title="Create the Survey Specification">
+  
+A survey specification is a JSON object with name, description, and spec (array of questions):
+
+```json
+{
+  "name": "Deployment Survey",
+  "description": "Collect deployment parameters",
+  "spec": [
+    {
+      "type": "text",
+      "question_name": "Application Version",
+      "question_description": "Version to deploy (e.g., 2.0.1)",
+      "variable": "app_version",
+      "required": true,
+      "default": "",
+      "min": 0,
+      "max": 50
+    },
+    {
+      "type": "multiplechoice",
+      "question_name": "Target Environment",
+      "question_description": "Which environment to deploy to",
+      "variable": "environment",
+      "required": true,
+      "choices": ["dev", "staging", "production"],
+      "default": "dev"
+    },
+    {
+      "type": "multiselect",
+      "question_name": "Deploy Components",
+      "question_description": "Select components to deploy",
+      "variable": "components",
+      "required": false,
+      "choices": ["api", "web", "worker", "scheduler"],
+      "default": "api\nweb"
+    }
+  ]
+}
+```
+
+</Step>
+
+<Step title="Add Survey to Job Template">
+
+<Tabs>
+  <Tab title="Web UI">
+    1. Navigate to your job template
+    2. Click the **Survey** tab
+    3. Click **Add**
+    4. For each question:
+       - Select question type
+       - Fill in question details
+       - Set variable name
+       - Configure validation
+    5. Click **Save**
+    6. Toggle **Survey Enabled**
+  </Tab>
+
+  <Tab title="API">
+    ```bash
+    # Create survey spec
+    curl -X POST https://awx.example.com/api/v2/job_templates/1/survey_spec/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d @survey_spec.json
+
+    # Enable survey
+    curl -X PATCH https://awx.example.com/api/v2/job_templates/1/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"survey_enabled": true}'
+    ```
+  </Tab>
+
+  <Tab title="Ansible">
+    ```yaml
+    - name: Create job template with survey
+      awx.awx.job_template:
+        name: Deploy Application
+        project: Infrastructure Playbooks
+        playbook: deploy.yml
+        inventory: Production Servers
+        survey_enabled: true
+        survey_spec:
+          name: Deployment Survey
+          description: Collect deployment parameters
+          spec:
+            - type: text
+              question_name: Application Version
+              question_description: Version to deploy
+              variable: app_version
+              required: true
+              default: ""
+            - type: multiplechoice
+              question_name: Target Environment
+              question_description: Environment to deploy to
+              variable: environment
+              required: true
+              choices:
+                - dev
+                - staging  
+                - production
+              default: dev
+        state: present
+    ```
+  </Tab>
+</Tabs>
+
+</Step>
+
+<Step title="Launch with Survey Responses">
+
+When launching a job with a survey, provide answers:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/job_templates/1/launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "extra_vars": {
+      "app_version": "2.1.0",
+      "environment": "production",
+      "components": ["api", "web", "worker"]
+    }
+  }'
+```
+
+With Ansible:
+
+```yaml
+- name: Launch job with survey responses
+  awx.awx.job_launch:
+    job_template: Deploy Application
+    extra_vars:
+      app_version: "2.1.0"
+      environment: production
+      components:
+        - api
+        - web
+        - worker
+    wait: true
+```
+
+</Step>
+
+</Steps>
+
+## Survey Validation
+
+### Text Validation
+
+```json
+{
+  "type": "text",
+  "variable": "hostname",
+  "min": 5,        // Minimum length
+  "max": 63,       // Maximum length
+  "required": true,
+  "default": "server01"
+}
+```
+
+### Integer Validation
+
+```json
+{
+  "type": "integer",
+  "variable": "port",
+  "min": 1,        // Minimum value
+  "max": 65535,    // Maximum value
+  "required": true,
+  "default": 8080
+}
+```
+
+### Float Validation
+
+```json
+{
+  "type": "float",
+  "variable": "cpu_limit",
+  "min": 0.1,      // Minimum value
+  "max": 16.0,     // Maximum value
+  "required": false,
+  "default": 1.0
+}
+```
+
+### Multiple Choice Validation
+
+```json
+{
+  "type": "multiplechoice",
+  "variable": "size",
+  "choices": ["small", "medium", "large"],
+  "required": true,
+  "default": "medium"
+}
+```
+
+<Note>
+  The selected value must be one of the defined choices
+</Note>
+
+### Multi-Select Validation
+
+```json
+{
+  "type": "multiselect",
+  "variable": "tags",
+  "choices": ["web", "api", "db", "cache"],
+  "required": false,
+  "default": "web\napi"  // Newline-separated defaults
+}
+```
+
+## Using Survey Variables in Playbooks
+
+Survey responses are available as extra variables:
+
+```yaml
+---
+- name: Deploy Application
+  hosts: "{{ environment }}_servers"
+  vars:
+    version: "{{ app_version }}"
+  
+  tasks:
+    - name: Display deployment info
+      debug:
+        msg: "Deploying version {{ app_version }} to {{ environment }}"
+    
+    - name: Deploy components
+      include_tasks: "deploy_{{ item }}.yml"
+      loop: "{{ components }}"
+      when: components is defined
+    
+    - name: Configure application
+      template:
+        src: app.conf.j2
+        dest: /etc/app/config.ini
+      vars:
+        app_version: "{{ app_version }}"
+        environment: "{{ environment }}"
+```
+
+## Advanced Survey Examples
+
+### Complete Deployment Survey
+
+```json
+{
+  "name": "Application Deployment",
+  "description": "Complete deployment configuration",
+  "spec": [
+    {
+      "type": "text",
+      "question_name": "Application Version",
+      "question_description": "Semantic version (e.g., 2.1.0)",
+      "variable": "app_version",
+      "required": true,
+      "min": 5,
+      "max": 20,
+      "default": ""
+    },
+    {
+      "type": "multiplechoice",
+      "question_name": "Environment",
+      "question_description": "Target deployment environment",
+      "variable": "environment",
+      "required": true,
+      "choices": ["dev", "qa", "staging", "production"],
+      "default": "dev"
+    },
+    {
+      "type": "text",
+      "question_name": "Git Branch",
+      "question_description": "Git branch or tag to deploy",
+      "variable": "git_branch",
+      "required": false,
+      "default": "main",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "type": "multiselect",
+      "question_name": "Services",
+      "question_description": "Services to restart after deployment",
+      "variable": "restart_services",
+      "required": false,
+      "choices": ["nginx", "gunicorn", "celery", "redis"],
+      "default": "gunicorn\ncelery"
+    },
+    {
+      "type": "multiplechoice",
+      "question_name": "Run Migrations",
+      "question_description": "Run database migrations?",
+      "variable": "run_migrations",
+      "required": true,
+      "choices": ["yes", "no"],
+      "default": "yes"
+    },
+    {
+      "type": "integer",
+      "question_name": "Timeout",
+      "question_description": "Deployment timeout in seconds",
+      "variable": "deploy_timeout",
+      "required": false,
+      "default": 300,
+      "min": 60,
+      "max": 3600
+    }
+  ]
+}
+```
+
+### Server Provisioning Survey
+
+```json
+{
+  "name": "Server Provisioning",
+  "description": "Provision new server instance",
+  "spec": [
+    {
+      "type": "text",
+      "question_name": "Server Name",
+      "question_description": "Hostname for the new server",
+      "variable": "server_name",
+      "required": true,
+      "min": 3,
+      "max": 63
+    },
+    {
+      "type": "multiplechoice",
+      "question_name": "Instance Size",
+      "question_description": "Server size/tier",
+      "variable": "instance_size",
+      "required": true,
+      "choices": ["t3.small", "t3.medium", "t3.large", "t3.xlarge"],
+      "default": "t3.medium"
+    },
+    {
+      "type": "multiplechoice",
+      "question_name": "Region",
+      "question_description": "AWS region",
+      "variable": "aws_region",
+      "required": true,
+      "choices": ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"],
+      "default": "us-east-1"
+    },
+    {
+      "type": "multiselect",
+      "question_name": "Security Groups",
+      "question_description": "Security groups to assign",
+      "variable": "security_groups",
+      "required": true,
+      "choices": ["web", "ssh", "monitoring", "backup"],
+      "default": "web\nssh\nmonitoring"
+    },
+    {
+      "type": "integer",
+      "question_name": "Disk Size",
+      "question_description": "Root volume size in GB",
+      "variable": "disk_size_gb",
+      "required": true,
+      "default": 50,
+      "min": 20,
+      "max": 500
+    }
+  ]
+}
+```
+
+## Survey Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Clear Questions" icon="message">
+    Use descriptive question names and helpful descriptions
+  </Card>
+
+  <Card title="Sensible Defaults" icon="check">
+    Provide safe default values for optional fields
+  </Card>
+
+  <Card title="Appropriate Types" icon="list">
+    Use multiple choice for limited options instead of text
+  </Card>
+
+  <Card title="Validation Rules" icon="shield-check">
+    Set min/max constraints to prevent invalid input
+  </Card>
+</CardGroup>
+
+## Combining with Extra Variables
+
+Survey variables can be combined with job template extra_vars:
+
+```yaml
+# Job template extra_vars
+extra_vars:
+  ansible_user: deploy
+  base_path: /opt/app
+
+# Survey adds:
+# app_version: "2.1.0"
+# environment: "production"
+
+# Final variables (survey takes precedence):
+# ansible_user: deploy
+# base_path: /opt/app
+# app_version: "2.1.0"
+# environment: "production"
+```
+
+<Note>
+  Survey variables override job template extra_vars if there are conflicts.
+</Note>
+
+## Managing Surveys
+
+### View Survey Specification
+
+```bash
+curl https://awx.example.com/api/v2/job_templates/1/survey_spec/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Update Survey
+
+```bash
+curl -X POST https://awx.example.com/api/v2/job_templates/1/survey_spec/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @updated_survey.json
+```
+
+### Delete Survey
+
+```bash
+curl -X DELETE https://awx.example.com/api/v2/job_templates/1/survey_spec/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Enable/Disable Survey
+
+```bash
+# Disable survey
+curl -X PATCH https://awx.example.com/api/v2/job_templates/1/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"survey_enabled": false}'
+
+# Enable survey
+curl -X PATCH https://awx.example.com/api/v2/job_templates/1/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"survey_enabled": true}'
+```
+
+## Workflow Surveys
+
+Workflows can also have surveys:
+
+```yaml
+- name: Create workflow with survey
+  awx.awx.workflow_job_template:
+    name: Release Pipeline
+    organization: Engineering
+    survey_enabled: true
+    survey_spec:
+      name: Release Survey
+      description: Release configuration
+      spec:
+        - type: text
+          question_name: Release Version
+          variable: release_version
+          required: true
+        - type: multiplechoice
+          question_name: Release Type
+          variable: release_type
+          choices:
+            - major
+            - minor
+            - patch
+          default: minor
+    state: present
+```
+
+Workflow survey variables are available to all job templates in the workflow.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Survey not appearing when launching">
+    Verify:
+    - Survey is enabled: `survey_enabled: true`
+    - Survey spec is not empty
+    - At least one question is defined
+    
+    Check status:
+    ```bash
+    curl https://awx.example.com/api/v2/job_templates/1/ \
+      -H "Authorization: Bearer YOUR_TOKEN" | \
+      jq '{survey_enabled, ask_variables_on_launch}'
+    ```
+  </Accordion>
+
+  <Accordion title="Validation errors on launch">
+    Common issues:
+    - Value outside min/max range
+    - Required field not provided
+    - Choice not in defined list
+    - Wrong data type (string vs integer)
+    
+    Test validation:
+    ```bash
+    # Launch with -v to see validation errors
+    curl -X POST https://awx.example.com/api/v2/job_templates/1/launch/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"extra_vars": {"app_version": "test"}}' \
+      -v
+    ```
+  </Accordion>
+
+  <Accordion title="Variables not available in playbook">
+    Check:
+    - Variable name in survey matches playbook usage
+    - Survey is enabled
+    - Launch included survey responses
+    
+    Verify variables received:
+    ```yaml
+    - name: Debug all variables
+      debug:
+        var: vars
+    ```
+  </Accordion>
+
+  <Accordion title="Multi-select not working">
+    For multi-select:
+    - Use array in launch: `["option1", "option2"]`
+    - Default uses newline: `"option1\noption2"`
+    - In playbook, access as list: `{{ components }}`
+    
+    Example:
+    ```yaml
+    loop: "{{ components | default([]) }}"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Survey vs Ask on Launch
+
+Comparison:
+
+<table>
+  <thead>
+    <tr>
+      <th>Feature</th>
+      <th>Survey</th>
+      <th>Ask on Launch</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>User Interface</td>
+      <td>Custom form</td>
+      <td>Standard fields</td>
+    </tr>
+    <tr>
+      <td>Validation</td>
+      <td>Custom rules</td>
+      <td>Basic validation</td>
+    </tr>
+    <tr>
+      <td>Variable Names</td>
+      <td>Custom names</td>
+      <td>Predefined (inventory, limit, etc.)</td>
+    </tr>
+    <tr>
+      <td>Use Case</td>
+      <td>Custom application variables</td>
+      <td>Job template settings</td>
+    </tr>
+  </tbody>
+</table>
+
+Use both together:
+
+```yaml
+job_template:
+  survey_enabled: true  # For app_version, environment
+  ask_inventory_on_launch: true  # For inventory selection
+  ask_limit_on_launch: true  # For host limiting
+```
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Job Templates" icon="play" href="/guides/running-jobs">
+    Create job templates that use surveys
+  </Card>
+  
+  <Card title="Workflows" icon="diagram-project" href="/api/overview">
+    Add surveys to workflow templates
+  </Card>
+  
+  <Card title="Extra Variables" icon="code" href="/api/overview">
+    Learn about variable precedence
+  </Card>
+  
+  <Card title="Job Launch API" icon="rocket" href="/api/overview">
+    API reference for launching jobs with surveys
+  </Card>
+</CardGroup>

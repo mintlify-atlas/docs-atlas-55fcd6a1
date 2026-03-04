@@ -1,0 +1,458 @@
+---
+title: Clustering
+description: Scale AWX horizontally with multi-node deployments
+icon: network-wired
+---
+
+AWX supports multi-node cluster configurations that enable horizontal scaling, high availability, and increased job execution capacity.
+
+## Architecture Overview
+
+AWX can be deployed in a clustered configuration with multiple control plane nodes working together to handle API requests and execute jobs.
+
+```
+       ┌───────────────────────────┐
+       │      Load-balancer        │
+       │   (configured separately) │
+       └───┬───────────────────┬───┘
+           │   round robin API │
+           ▼       requests    ▼
+
+  AWX Control               AWX Control
+    Node 1                    Node 2
+┌──────────────┐           ┌──────────────┐
+│              │           │              │
+│ ┌──────────┐ │           │ ┌──────────┐ │
+│ │ awx-task │ │           │ │ awx-task │ │
+│ ├──────────┤ │           │ ├──────────┤ │
+│ │ awx-ee   │ │           │ │ awx-ee   │ │
+│ ├──────────┤ │           │ ├──────────┤ │
+│ │ awx-web  │ │           │ │ awx-web  │ │
+│ ├──────────┤ │           │ ├──────────┤ │
+│ │ redis    │ │           │ │ redis    │ │
+│ └──────────┘ │           │ └──────────┘ │
+│              │           │              │
+└──────────────┴─────┬─────┴──────────────┘
+                     │
+                     │
+               ┌─────▼─────┐
+               │ Postgres  │
+               │ database  │
+               └───────────┘
+```
+
+## Deployment Types
+
+There are two main deployment types:
+
+<CardGroup cols={2}>
+  <Card title="Virtual Machines (VM)" icon="server">
+    Ansible Automation Platform (AAP) can be installed on VMs with traditional OS-level processes
+  </Card>
+  <Card title="Kubernetes (K8S)" icon="dharmachakra">
+    Both AAP and upstream AWX support K8S deployments with containerized services
+  </Card>
+</CardGroup>
+
+<Note>
+The upstream AWX project can only be installed via a K8S deployment. Either deployment type supports cluster scaling.
+</Note>
+
+## Control Node Components
+
+### VM Deployments
+
+Control plane nodes run background services managed by supervisord:
+- **dispatcher** - Job scheduling and task management
+- **wsbroadcast** - WebSocket communication between nodes
+- **callback receiver** - Ansible callback processing
+- **receptor** - Mesh networking (managed under systemd)
+- **redis** - Caching and message broker (managed under systemd)
+- **uwsgi** - WSGI application server
+- **daphne** - ASGI server for WebSockets
+- **rsyslog** - Logging service
+
+### Kubernetes Deployments
+
+Background processes are containerized:
+
+<CardGroup cols={2}>
+  <Card title="awx-ee" icon="docker">
+    receptor
+  </Card>
+  <Card title="awx-web" icon="globe">
+    uwsgi, daphne, wsbroadcast, rsyslog
+  </Card>
+  <Card title="awx-task" icon="list-check">
+    dispatcher, callback receiver
+  </Card>
+  <Card title="redis" icon="database">
+    redis
+  </Card>
+</CardGroup>
+
+### Monolithic Design
+
+<Note>
+Each control node is monolithic and contains all necessary components for handling API requests and running jobs.
+</Note>
+
+**Key Characteristics:**
+- Load balancer distributes incoming requests across control nodes
+- All control nodes interact with a single, shared PostgreSQL database
+- If any service fails sufficiently, the entire instance is placed offline automatically for remediation
+
+## Scaling the Cluster
+
+### AAP Deployments
+
+<Steps>
+  <Step title="Modify Inventory">
+    Edit the Ansible inventory file to include new nodes
+  </Step>
+  <Step title="Run Setup Script">
+    Execute `setup.sh` to provision the new nodes
+  </Step>
+  <Step title="Verify Registration">
+    New control plane node is registered in the database as a new `Instance`
+  </Step>
+</Steps>
+
+### Kubernetes Deployments
+
+```bash
+kubectl scale deployment awx-web --replicas=5
+kubectl scale deployment awx-task --replicas=5
+```
+
+Scaling is handled by changing the number of replicas in the AWX replica set.
+
+## Instance Types
+
+Nodes can be configured with different types based on their role:
+
+| Type | AAP Only | Description |
+|------|----------|-------------|
+| **control** | No | Control plane node that cannot run jobs |
+| **hybrid** | Yes | Control plane node that can also run jobs |
+| **execution** | No | Not a control node, can only run jobs |
+| **hop** | Yes | Routes traffic from control to execution nodes |
+
+<Warning>
+`hybrid` and `control` nodes are identical other than the type indicated in the database. Control-type nodes still have all machinery to run jobs but are disabled through the API. This allows provisioning control nodes with fewer hardware resources.
+</Warning>
+
+## Communication Between Nodes
+
+### Connection Matrix
+
+| Node Type | Connection Type | Purpose |
+|-----------|-----------------|----------|
+| Control node | websockets, receptor | Sending websockets, heartbeat |
+| Execution | receptor | Submitting jobs, heartbeat |
+| Hop (AAP only) | receptor | Routing traffic to execution nodes |
+| Postgres | postgres TCP/IP | Read and write queries, pg notify |
+
+### Receptor
+
+Receptor provides an overlay network connecting control, execution, and hop nodes.
+
+**How It Works:**
+- Establishes periodic heartbeats between nodes
+- Submits jobs to execution nodes
+- Forms a mesh via persistent TCP/IP connections
+- Routes traffic through intermediate nodes
+
+```
+node A <---TCP---> node B <---TCP---> node C
+```
+
+<Note>
+Node A is reachable from node C (and vice versa) even without a direct connection. Receptor routes traffic through node B.
+</Note>
+
+### WebSocket Backplane
+
+Each control node establishes websocket connections to all other control nodes.
+
+```
+┌────────┐
+│        │
+│browser │
+│        │
+└───┬────┘
+    │ websocket connection
+    │
+┌───▼─────┐            ┌─────────┐
+│ control │            │ control │
+│ node A  │◄───────────┤ node B  │
+└─────────┘  websocket └─────────┘
+             connection
+             (job event)
+```
+
+**Purpose:**
+- Stream real-time data to UI (job events, logs)
+- Load balancer determines which control node browsers connect to
+- Control nodes broadcast messages to all other nodes
+- Ensures users see real-time updates regardless of which node generates them
+
+<Note>
+The websocket backplane is handled by the `wsbroadcast` service that starts with the application.
+</Note>
+
+### PostgreSQL
+
+AWX uses psycopg3 to connect to PostgreSQL:
+- Only control nodes need direct database access
+- Uses `pg_notify` for inter-process communication
+- Enables dispatcher system to coordinate parallel processes
+- Task manager communicates with main dispatcher thread via notifications
+
+## Node Health Management
+
+Node health is determined by the `cluster_node_heartbeat` periodic task running on each control node.
+
+### Heartbeat Process
+
+<Steps>
+  <Step title="Get Instance List">
+    Retrieve all instances registered in the database
+  </Step>
+  <Step title="Inspect Execution Nodes">
+    - Acquire DB advisory lock (single control node inspects at a time)
+    - Set `last_seen` based on Receptor heartbeat
+    - Gather node info via `receptorctl status`
+    - Run `execution_node_health_check`
+    - Execute `ansible-runner --worker-info` to get CPU, memory, version
+    - Calculate capacity for the instance
+  </Step>
+  <Step title="Detect Lost Nodes">
+    - Calculate grace period: `CLUSTER_NODE_HEARTBEAT_PERIOD * CLUSTER_NODE_MISSED_HEARTBEAT_TOLERANCE`
+    - Mark instances as lost if `last_seen` exceeds grace period
+  </Step>
+  <Step title="Check Local Health">
+    - Determine if current node is lost
+    - Call `get_cpu_count` and `get_mem_in_bytes` from ansible-runner
+  </Step>
+  <Step title="Register New Instance">
+    If current instance not found in database, register it
+  </Step>
+  <Step title="Version Comparison">
+    - Compare current node's ansible-runner version with others
+    - If older, call `stop_local_services` and shut down
+  </Step>
+  <Step title="Handle Lost Instances">
+    - Reap running, pending, and waiting jobs (mark as failed)
+    - Delete instance from database
+  </Step>
+  <Step title="Reap Local Jobs">
+    Clean up jobs not actively processed by dispatcher workers
+  </Step>
+</Steps>
+
+## Instance Groups
+
+Instances can be organized into Instance Groups for workload management and resource allocation.
+
+### Creating Instance Groups
+
+System Administrators can create Instance Groups:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/instance_groups/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Production Workers",
+    "policy_instance_percentage": 50
+  }'
+```
+
+### Associating Instances
+
+Add instances to groups:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/instance_groups/x/instances/ \
+  -H "Content-Type: application/json" \
+  -d '{"id": y}'
+```
+
+<Note>
+Instances automatically reconfigure to listen on the group's work queue when added.
+</Note>
+
+## Instance Group Policies
+
+Policies determine automatic instance assignment to groups:
+
+### Policy Fields
+
+<CardGroup cols={3}>
+  <Card title="policy_instance_percentage" icon="percent">
+    Percentage (0-100) of active instances to assign to this group
+  </Card>
+  <Card title="policy_instance_minimum" icon="hashtag">
+    Minimum number of instances to maintain in the group
+  </Card>
+  <Card title="policy_instance_list" icon="list">
+    Fixed list of instance names to always include
+  </Card>
+</CardGroup>
+
+### Policy Behavior
+
+**Percentage + Minimum Work Together:**
+If you have 50% percentage and minimum of 2:
+- With 6 instances → 3 assigned to group
+- With 2 instances → 2 assigned (meets minimum)
+- With 1 instance → 1 assigned (can't meet minimum)
+
+**Preventing Overlap:**
+Make percentages sum to 100 across groups:
+- 4 instance groups with 25% each
+- Instances distributed with no overlap
+
+### Manually Pinning Instances
+
+To exclusively assign an instance to specific groups:
+
+```bash
+# Add to policy list
+curl -X PATCH https://awx.example.com/api/v2/instance_groups/N/ \
+  -d '{
+    "policy_instance_list": ["special-instance"]
+  }'
+
+# Disable policy management
+curl -X PATCH https://awx.example.com/api/v2/instances/X/ \
+  -d '{
+    "managed_by_policy": false
+  }'
+```
+
+<Warning>
+Instances with `managed_by_policy: false` will only belong to groups in their `policy_instance_list`.
+</Warning>
+
+## Job Runtime Behavior
+
+When a job is submitted:
+1. Pushed into dispatcher queue via postgres notify/listen
+2. Handled by dispatcher process on a specific AWX node
+3. If instance fails during job execution, work is marked as permanently failed
+
+### Instance Group Job Assignment
+
+If cluster has separate Instance Groups:
+- Any instance in the group can receive jobs
+- Capacity reduced from all groups an instance belongs to
+- Provisioning instances expands work capacity
+- De-provisioning removes capacity
+
+<Warning>
+If all instances in an Instance Group are offline, jobs targeting only that group will wait until instances become available.
+</Warning>
+
+## Controlling Job Placement
+
+### Default Behavior
+
+Jobs are submitted to:
+- **Default queue**: For regular jobs (see `DEFAULT_EXECUTION_QUEUE_NAME`)
+- **Control plane queue**: For administrative actions like project updates (see `DEFAULT_CONTROL_PLANE_QUEUE_NAME`)
+
+### Restricting Job Placement
+
+Instance Groups can be associated with:
+1. **Job Template** (highest priority)
+2. **Inventory** (medium priority)
+3. **Organization** (lowest priority, via Inventory)
+
+<Note>
+If all associated instance groups are at capacity, jobs remain in pending state until capacity frees up.
+</Note>
+
+### Preferred Instance Group Order
+
+AWX checks in this order:
+1. Job Template instance groups
+2. Inventory instance groups (if template groups at capacity)
+3. Organization instance groups (if inventory groups at capacity)
+
+The global instance group can be associated alongside custom groups as a fallback.
+
+## Project Synchronization
+
+Project syncs run on the instance that prepares the ansible-runner private data directory.
+
+**Sync Behavior:**
+- Performed by dispatcher control/launch process
+- Updates source tree to correct version immediately before job transmission
+- Skipped if correct revision already checked out and no Galaxy/Collections updates needed
+- Recorded as project update with `launch_type: sync` and `job_type: run`
+- Does not change project status or version (except for "never updated" projects)
+- Runs with container isolation, volume mounts to persistent projects folder
+
+## Instance Enable/Disable
+
+Temporarily take instances offline:
+
+```bash
+curl -X PATCH https://awx.example.com/api/v2/instances/X/ \
+  -d '{"enabled": false}'
+```
+
+<Note>
+When disabled:
+- No new jobs assigned to the instance
+- Existing jobs finish normally
+- Useful for maintenance without terminating running jobs
+</Note>
+
+## Status and Monitoring
+
+### Cluster Health Endpoint
+
+```bash
+curl https://awx.example.com/api/v2/ping/
+```
+
+**Returns:**
+- Instance servicing the HTTP request
+- Last heartbeat time of all other instances
+- Instance Groups and membership
+
+### Detailed Views
+
+<CardGroup cols={2}>
+  <Card title="Instances" icon="server">
+    `/api/v2/instances/` - View instance details and running jobs
+  </Card>
+  <Card title="Instance Groups" icon="layer-group">
+    `/api/v2/instance_groups/` - View groups and membership
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Load Balancer" icon="scale-balanced">
+    Configure proper health checks and session affinity for WebSocket connections
+  </Card>
+  <Card title="Database Performance" icon="database">
+    Use dedicated PostgreSQL instance with appropriate resources and tuning
+  </Card>
+  <Card title="Network Reliability" icon="wifi">
+    Ensure stable, low-latency connections between cluster nodes
+  </Card>
+  <Card title="Capacity Planning" icon="chart-line">
+    Monitor capacity and scale before reaching limits
+  </Card>
+  <Card title="Backup Strategy" icon="floppy-disk">
+    Regular database backups are critical in clustered environments
+  </Card>
+  <Card title="Version Consistency" icon="code-compare">
+    Keep all nodes on the same AWX version to prevent automatic shutdowns
+  </Card>
+</CardGroup>

@@ -1,0 +1,302 @@
+---
+title: Role-Based Access Control (RBAC)
+description: Manage user permissions and access control in AWX
+icon: shield-halved
+---
+
+The Role-Based Access Control (RBAC) system in AWX provides granular permission management for resources, enabling secure multi-tenant automation environments.
+
+## Overview
+
+AWX's RBAC system has been moved to the `django-ansible-base` library, providing a standardized approach to access control across Ansible automation projects.
+
+<Note>
+The RBAC implementation is now maintained in the django-ansible-base library:
+https://github.com/ansible/django-ansible-base
+</Note>
+
+## Core Concepts
+
+### Users and Teams
+
+**Users** are individual accounts that can:
+- Be assigned direct permissions to resources
+- Belong to one or more teams
+- Have organization-level roles
+- Be designated as superusers (full system access)
+
+**Teams** are groups of users that:
+- Share common permissions across resources
+- Simplify permission management for groups
+- Can have organization-scoped access
+- Support hierarchical permission inheritance
+
+### Organizations
+
+Organizations are the top-level container for AWX resources:
+- Group related projects, inventories, and templates
+- Provide logical separation between different departments or customers
+- Enable multi-tenant environments
+- Have dedicated admin and auditor roles
+
+### Roles
+
+Roles define what actions users or teams can perform on resources:
+
+<CardGroup cols={2}>
+  <Card title="Admin" icon="user-crown">
+    Full control over a resource including permissions management
+  </Card>
+  <Card title="Execute" icon="play">
+    Ability to launch jobs and workflows
+  </Card>
+  <Card title="Read" icon="eye">
+    View-only access to resource details
+  </Card>
+  <Card title="Update" icon="pen-to-square">
+    Modify resource configuration
+  </Card>
+  <Card title="Use" icon="hand-pointer">
+    Use resource in job templates (for credentials, inventories)
+  </Card>
+  <Card title="Adhoc" icon="terminal">
+    Run ad-hoc commands against inventory
+  </Card>
+</CardGroup>
+
+## Resource-Level Permissions
+
+### Job Templates
+
+Permissions control who can:
+- **Admin**: Modify template, manage permissions, delete
+- **Execute**: Launch jobs from the template
+- **Read**: View template configuration
+
+### Inventories
+
+<Steps>
+  <Step title="Admin Role">
+    Full control including managing hosts, groups, and inventory sources
+  </Step>
+  <Step title="Update Role">
+    Modify inventory structure and variables
+  </Step>
+  <Step title="Use Role">
+    Select inventory when launching jobs
+  </Step>
+  <Step title="Adhoc Role">
+    Run ad-hoc commands against inventory hosts
+  </Step>
+  <Step title="Read Role">
+    View inventory details without modification
+  </Step>
+</Steps>
+
+### Credentials
+
+Credentials use a restricted permission model:
+- **Admin**: Manage credential and grant access to others
+- **Use**: Utilize credential in job templates (cannot view secret values)
+- **Read**: View credential metadata (not secret fields)
+
+<Warning>
+Users with "Use" permission can leverage credentials without viewing secret values. Be careful when granting credential access as users can execute jobs with those credentials.
+</Warning>
+
+### Projects
+
+Project permissions determine access to source control repositories:
+- **Admin**: Full project management including SCM configuration
+- **Use**: Reference project in job templates
+- **Update**: Trigger project syncs
+- **Read**: View project details
+
+### Workflows
+
+**Workflow Admin Role** enables:
+- Creating and modifying workflow templates
+- Managing workflow nodes and topology
+- Configuring approval nodes
+- Setting up workflow schedules
+
+**Workflow Execute Role** allows:
+- Launching workflow jobs
+- Viewing workflow job results
+
+**Workflow Approval Role** permits:
+- Approving or denying workflow approval nodes
+- Only applicable to workflows with approval steps
+
+## Organization-Level Roles
+
+### Organization Admin
+
+Organization Admins have broad permissions within their organization:
+- Create and manage all resources (projects, inventories, templates)
+- Grant permissions to other users
+- Manage teams within the organization
+- Cannot access resources in other organizations (unless explicitly granted)
+
+### Organization Auditor
+
+Auditors have read-only access across the organization:
+- View all resources and configurations
+- Monitor job execution and results
+- Cannot modify or execute anything
+- Useful for compliance and oversight
+
+### Organization Member
+
+Basic membership in an organization:
+- No implicit permissions
+- Must be granted specific resource-level roles
+- Can view organization details
+
+## System-Level Roles
+
+### System Administrator
+
+<Note>
+Superusers have unrestricted access to all AWX resources and settings across all organizations.
+</Note>
+
+Capabilities include:
+- Full system configuration
+- User and organization management
+- Access to all resources regardless of organization
+- System-level settings and maintenance
+
+### System Auditor
+
+Read-only access across the entire AWX instance:
+- View all organizations and resources
+- Monitor system-wide activity
+- Cannot execute or modify anything
+- Perfect for security audits and compliance
+
+## Permission Inheritance
+
+Permissions follow an inheritance hierarchy:
+
+```
+Organization Admin
+    ↓
+Resource Admin (e.g., Project Admin)
+    ↓
+Resource-Specific Roles (Execute, Update, Use, Read)
+```
+
+**Inheritance Rules:**
+- Organization Admins automatically have admin access to all resources in their organization
+- Resource Admins can grant lower-level permissions to others
+- Higher-level permissions include all lower-level permissions
+- Superusers bypass all RBAC checks
+
+## Common RBAC Patterns
+
+### Multi-Tenant Setup
+
+<Steps>
+  <Step title="Create Organizations">
+    Set up separate organizations for each tenant or department
+  </Step>
+  <Step title="Assign Organization Admins">
+    Designate admins who manage resources within their organization
+  </Step>
+  <Step title="Create Teams">
+    Group users by function (developers, operators, auditors)
+  </Step>
+  <Step title="Grant Team Permissions">
+    Assign appropriate roles to teams for required resources
+  </Step>
+</Steps>
+
+### Development/Production Separation
+
+<CardGroup cols={2}>
+  <Card title="Development Teams" icon="code">
+    Grant Execute and Update permissions on dev inventories and templates
+  </Card>
+  <Card title="Production Teams" icon="server">
+    Restrict to Execute-only on production resources with change control
+  </Card>
+</CardGroup>
+
+### Credential Isolation
+
+Leverage credential "Use" permission:
+1. Store sensitive credentials (cloud APIs, SSH keys)
+2. Grant "Use" permission to teams/users
+3. Users can launch jobs without viewing secrets
+4. Maintains security while enabling automation
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Least Privilege" icon="lock">
+    Grant minimum permissions required for users to perform their duties
+  </Card>
+  <Card title="Use Teams" icon="users">
+    Manage permissions at team level rather than individual users
+  </Card>
+  <Card title="Regular Audits" icon="magnifying-glass">
+    Periodically review and revoke unnecessary permissions
+  </Card>
+  <Card title="Separate Environments" icon="layer-group">
+    Use organizations to isolate dev, staging, and production
+  </Card>
+</CardGroup>
+
+## API Access
+
+RBAC applies to API access:
+- Users can only access resources they have permissions for
+- API tokens inherit the user's permissions
+- OAuth2 tokens can have scoped permissions
+- Personal Access Tokens (PAT) support for API automation
+
+## Troubleshooting Permissions
+
+### User Cannot See Resource
+
+<Steps>
+  <Step title="Check Organization Membership">
+    Verify user is a member of the resource's organization
+  </Step>
+  <Step title="Review Direct Permissions">
+    Check if user has any role assigned on the resource
+  </Step>
+  <Step title="Check Team Permissions">
+    Verify if user's teams have access to the resource
+  </Step>
+  <Step title="Parent Resource Access">
+    Some resources require permissions on parent (e.g., project access may require organization access)
+  </Step>
+</Steps>
+
+### User Cannot Execute Job Template
+
+<Warning>
+To execute a job template, users need:
+- Execute permission on the job template
+- Use permission on associated credential(s)
+- Use permission on the inventory
+- Read permission on the project
+</Warning>
+
+Missing any of these permissions will prevent job launch.
+
+## Migration Notes
+
+If migrating from older AWX versions:
+- Legacy RBAC settings are automatically migrated
+- Review permissions after upgrade
+- Test user access in non-production first
+- django-ansible-base provides enhanced flexibility
+
+## Related Resources
+
+- [django-ansible-base GitHub Repository](https://github.com/ansible/django-ansible-base)
+- [AWX API Documentation](/api/overview)
+- [User Management Guide](/guides/organizations-and-teams)

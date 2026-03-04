@@ -1,0 +1,557 @@
+---
+title: Logging Integration
+description: Send AWX logs and analytics to external log aggregation services
+---
+
+AWX can send detailed logs to third-party log aggregation services for analysis, monitoring, and compliance. Logs are transmitted in JSON format over HTTP, TCP, or UDP connections.
+
+## Overview
+
+AWX logging integration provides:
+
+- Real-time streaming of job events and activity
+- Structured JSON log format
+- Support for multiple log aggregation platforms
+- Configurable log sources and levels
+- Secure transmission with TLS/SSL support
+
+## Supported Services
+
+### Officially Supported
+
+- **Splunk** - Enterprise log aggregation and analysis
+- **Elastic Stack (ELK)** - Elasticsearch, Logstash, Kibana
+
+### Tested and Compatible
+
+- **Sumologic** - Cloud-based log management
+- **Loggly** - Cloud logging and monitoring
+
+### Potentially Compatible
+
+- **Datadog** - Infrastructure monitoring and logging
+- **Red Hat Common Logging** - Via Logstash connector
+
+## Log Sources
+
+AWX provides several specialized log sources:
+
+### Job Event Logs
+
+**Logger:** `awx.analytics.job_events`
+
+Captures detailed output from Ansible playbook execution:
+
+- Task execution results
+- Play and task metadata
+- Host-level event data
+- Ansible callback module output
+
+### Activity Stream Logs
+
+**Logger:** `awx.analytics.activity_stream`
+
+Records all changes to AWX objects:
+
+- User actions and operations
+- Object creation, modification, deletion
+- Association and disassociation events
+- Audit trail for compliance
+
+### System Tracking Logs
+
+**Logger:** `awx.analytics.system_tracking`
+
+Data from Ansible fact gathering and scan jobs:
+
+- System facts and configuration
+- Package inventories
+- Service states
+- File system information
+
+### AWX Application Logs
+
+Standard AWX application logs with configurable levels:
+
+- ERROR - Error messages with tracebacks
+- WARNING - Warning messages
+- INFO - Informational messages
+- DEBUG - Detailed debugging information
+
+## Configuration
+
+### Settings
+
+Configure log aggregation through the AWX Settings UI or API at `/api/v2/settings/logging/`:
+
+```json
+{
+  "LOG_AGGREGATOR_ENABLED": true,
+  "LOG_AGGREGATOR_HOST": "logs.example.com",
+  "LOG_AGGREGATOR_PORT": 514,
+  "LOG_AGGREGATOR_TYPE": "logstash",
+  "LOG_AGGREGATOR_USERNAME": "",
+  "LOG_AGGREGATOR_PASSWORD": "",
+  "LOG_AGGREGATOR_LOGGERS": [
+    "awx",
+    "activity_stream",
+    "job_events",
+    "system_tracking"
+  ],
+  "LOG_AGGREGATOR_INDIVIDUAL_FACTS": false,
+  "LOG_AGGREGATOR_TOWER_UUID": "a1b2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6",
+  "LOG_AGGREGATOR_PROTOCOL": "https",
+  "LOG_AGGREGATOR_TCP_TIMEOUT": 5,
+  "LOG_AGGREGATOR_VERIFY_CERT": true,
+  "LOG_AGGREGATOR_LEVEL": "INFO"
+}
+```
+
+### Connection Types
+
+**HTTPS:**
+- Most common for cloud services
+- Port specified in URL or PORT field
+- SSL/TLS encryption by default
+
+**TCP:**
+- Direct TCP connection
+- Requires hostname and port
+- Optional TLS encryption
+
+**UDP:**
+- Lightweight, fire-and-forget
+- No delivery guarantee
+- Best for high-volume, low-criticality logs
+
+## Splunk Integration
+
+### Configuration
+
+```json
+{
+  "LOG_AGGREGATOR_ENABLED": true,
+  "LOG_AGGREGATOR_HOST": "splunk.example.com",
+  "LOG_AGGREGATOR_PORT": 8088,
+  "LOG_AGGREGATOR_TYPE": "splunk",
+  "LOG_AGGREGATOR_USERNAME": "",
+  "LOG_AGGREGATOR_PASSWORD": "<hec-token>",
+  "LOG_AGGREGATOR_PROTOCOL": "https",
+  "LOG_AGGREGATOR_VERIFY_CERT": true
+}
+```
+
+### Splunk HTTP Event Collector (HEC)
+
+1. **Enable HEC in Splunk:**
+   - Settings → Data Inputs → HTTP Event Collector
+   - Click "Global Settings" and enable HEC
+   - Configure default source, source type, and index
+
+2. **Create Token:**
+   - Click "New Token"
+   - Name: "AWX Integration"
+   - Set allowed indexes
+   - Copy the token value
+
+3. **Configure AWX:**
+   - Use token as `LOG_AGGREGATOR_PASSWORD`
+   - URL format: `https://splunk.example.com:8088/services/collector`
+
+### Splunk Queries
+
+```spl
+# View all AWX logs
+index=main sourcetype=awx
+
+# Job events only
+index=main sourcetype=awx logger_name="awx.analytics.job_events"
+
+# Failed jobs
+index=main sourcetype=awx job_status=failed
+
+# Activity stream for user actions
+index=main sourcetype=awx logger_name="awx.analytics.activity_stream" actor=*
+```
+
+## Elastic Stack (ELK) Integration
+
+### Logstash Configuration
+
+Add JSON filter to Logstash config:
+
+```ruby
+# /etc/logstash/conf.d/awx.conf
+input {
+  tcp {
+    port => 5514
+    codec => json
+  }
+}
+
+filter {
+  json {
+    source => "message"
+  }
+  
+  # Parse timestamp
+  date {
+    match => [ "@timestamp", "ISO8601" ]
+  }
+  
+  # Add tags based on logger
+  if [logger_name] == "awx.analytics.job_events" {
+    mutate { add_tag => [ "job_event" ] }
+  }
+  
+  if [logger_name] == "awx.analytics.activity_stream" {
+    mutate { add_tag => [ "activity" ] }
+  }
+}
+
+output {
+  elasticsearch {
+    hosts => ["elasticsearch:9200"]
+    index => "awx-%{+YYYY.MM.dd}"
+  }
+}
+```
+
+### AWX Configuration
+
+```json
+{
+  "LOG_AGGREGATOR_ENABLED": true,
+  "LOG_AGGREGATOR_HOST": "logstash.example.com",
+  "LOG_AGGREGATOR_PORT": 5514,
+  "LOG_AGGREGATOR_TYPE": "logstash",
+  "LOG_AGGREGATOR_PROTOCOL": "tcp"
+}
+```
+
+### Kibana Dashboards
+
+Create index pattern in Kibana:
+
+```
+Index pattern: awx-*
+Time field: @timestamp
+```
+
+Example visualizations:
+- Job success/failure rates over time
+- Top users by activity
+- Job execution duration trends
+- Error rate by job template
+
+### Elasticsearch Queries
+
+```json
+// Get failed jobs
+{
+  "query": {
+    "bool": {
+      "must": [
+        { "match": { "logger_name": "awx.analytics.job_events" }},
+        { "match": { "status": "failed" }}
+      ]
+    }
+  }
+}
+
+// Activity by user
+{
+  "query": {
+    "match": { "logger_name": "awx.analytics.activity_stream" }
+  },
+  "aggs": {
+    "users": {
+      "terms": { "field": "actor.keyword" }
+    }
+  }
+}
+```
+
+## Sumologic Integration
+
+### Configuration
+
+```json
+{
+  "LOG_AGGREGATOR_ENABLED": true,
+  "LOG_AGGREGATOR_HOST": "https://collectors.sumologic.com/receiver/v1/http/<token>",
+  "LOG_AGGREGATOR_TYPE": "sumologic",
+  "LOG_AGGREGATOR_PROTOCOL": "https"
+}
+```
+
+### Sumologic Setup
+
+1. Create HTTP Source in Sumologic
+2. Copy the endpoint URL
+3. Use full URL as `LOG_AGGREGATOR_HOST`
+4. Configure source category for filtering
+
+## Loggly Integration
+
+### Configuration
+
+```json
+{
+  "LOG_AGGREGATOR_ENABLED": true,
+  "LOG_AGGREGATOR_HOST": "logs-01.loggly.com",
+  "LOG_AGGREGATOR_PORT": 514,
+  "LOG_AGGREGATOR_TYPE": "loggly",
+  "LOG_AGGREGATOR_PASSWORD": "<customer-token>",
+  "LOG_AGGREGATOR_PROTOCOL": "tcp"
+}
+```
+
+## Log Schema
+
+### Common Fields
+
+All logs include these fields:
+
+```json
+{
+  "@timestamp": "2026-03-04T12:00:00.000Z",
+  "cluster_host_id": "awx-host-1",
+  "level": "INFO",
+  "logger_name": "awx.analytics.job_events",
+  "path": "/awx/main/models/jobs.py",
+  "message": "Job completed successfully"
+}
+```
+
+### Job Event Schema
+
+```json
+{
+  "@timestamp": "2026-03-04T12:00:00.000Z",
+  "logger_name": "awx.analytics.job_events",
+  "level": "INFO",
+  "cluster_host_id": "awx-1",
+  "job_id": 123,
+  "job_name": "Deploy Application",
+  "event": "runner_on_ok",
+  "event_host": "web-server-1",
+  "task": "Install packages",
+  "role": "webserver",
+  "playbook": "site.yml",
+  "event_data": {
+    "res": {
+      "changed": true,
+      "msg": "Package installed"
+    }
+  }
+}
+```
+
+### Activity Stream Schema
+
+```json
+{
+  "@timestamp": "2026-03-04T12:00:00.000Z",
+  "logger_name": "awx.analytics.activity_stream",
+  "level": "INFO",
+  "cluster_host_id": "awx-1",
+  "actor": "admin",
+  "operation": "create",
+  "object1": "job_template 'Deploy App'",
+  "object2": null,
+  "changes": {
+    "name": [null, "Deploy App"],
+    "playbook": [null, "deploy.yml"]
+  }
+}
+```
+
+### System Tracking Schema
+
+```json
+{
+  "@timestamp": "2026-03-04T12:00:00.000Z",
+  "logger_name": "awx.analytics.system_tracking",
+  "level": "INFO",
+  "cluster_host_id": "awx-1",
+  "host": "web-server-1",
+  "inventory_id": 5,
+  "packages": {
+    "nginx": {"version": "1.18.0"},
+    "python3": {"version": "3.9.7"}
+  }
+}
+```
+
+## Selective Logging
+
+### Configure Log Sources
+
+Enable specific loggers:
+
+```json
+{
+  "LOG_AGGREGATOR_LOGGERS": [
+    "awx",              // AWX application logs
+    "activity_stream",  // Activity stream
+    "job_events",       // Job events
+    "system_tracking"   // System tracking
+  ]
+}
+```
+
+### Log Levels
+
+Set minimum log level:
+
+```json
+{
+  "LOG_AGGREGATOR_LEVEL": "INFO"  // DEBUG, INFO, WARNING, ERROR
+}
+```
+
+### Individual Facts
+
+Control system tracking detail:
+
+```json
+{
+  "LOG_AGGREGATOR_INDIVIDUAL_FACTS": false  // true for per-fact logging
+}
+```
+
+## Performance Considerations
+
+### Asynchronous Processing
+
+Logs are sent asynchronously to avoid blocking job execution. A timeout on the log aggregator will not cause AWX operations to hang.
+
+### Message Threading
+
+Log messages are sent in threaded mode to improve performance and prevent backlog.
+
+### Network Optimization
+
+- Use TCP or HTTPS for reliable delivery
+- UDP for high-volume, non-critical logs
+- Configure appropriate timeout values
+- Consider log aggregator proximity to AWX
+
+## Troubleshooting
+
+### Connection Issues
+
+**Verify connectivity:**
+```bash
+# Test TCP connection
+telnet logs.example.com 514
+
+# Test HTTPS endpoint
+curl -X POST https://logs.example.com:8088/services/collector \
+  -H "Authorization: Splunk <token>"
+```
+
+**Check AWX logs:**
+```bash
+# View AWX logs for aggregator errors
+docker logs awx_task | grep -i log_aggregator
+```
+
+### No Logs Appearing
+
+1. Verify `LOG_AGGREGATOR_ENABLED` is `true`
+2. Check selected loggers include desired sources
+3. Verify log level allows messages through
+4. Test with a simple job to generate events
+5. Check firewall rules between AWX and aggregator
+
+### SSL/TLS Errors
+
+```json
+{
+  "LOG_AGGREGATOR_VERIFY_CERT": false  // Disable for testing only
+}
+```
+
+For production, add CA certificate to AWX trust store.
+
+### Elasticsearch Performance
+
+**Index Management:**
+- Use date-based indices (e.g., `awx-2026.03.04`)
+- Configure index lifecycle management
+- Set appropriate retention policies
+- Consider hot/warm/cold architecture
+
+**Optimize Mappings:**
+```json
+{
+  "mappings": {
+    "properties": {
+      "event_data": { "enabled": false },
+      "@timestamp": { "type": "date" },
+      "job_id": { "type": "integer" }
+    }
+  }
+}
+```
+
+## API Configuration
+
+### Get Current Settings
+
+```bash
+curl https://awx.example.org/api/v2/settings/logging/ \
+  -H "Authorization: Bearer <token>"
+```
+
+### Update Settings
+
+```bash
+curl -X PATCH https://awx.example.org/api/v2/settings/logging/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "LOG_AGGREGATOR_ENABLED": true,
+    "LOG_AGGREGATOR_HOST": "logs.example.com",
+    "LOG_AGGREGATOR_PORT": 514
+  }'
+```
+
+## Best Practices
+
+### Security
+
+- Use HTTPS/TLS for transmission
+- Rotate aggregator credentials regularly
+- Restrict access to log data
+- Enable certificate verification in production
+- Use dedicated service accounts
+
+### Data Management
+
+- Set appropriate retention policies
+- Archive old logs to cold storage
+- Implement log rotation and compression
+- Monitor aggregator storage capacity
+
+### Monitoring
+
+- Alert on log aggregator connectivity failures
+- Monitor log volume and rates
+- Track parsing errors in aggregator
+- Set up dashboards for key metrics
+
+### Compliance
+
+- Enable activity stream for audit trail
+- Configure appropriate retention for compliance requirements
+- Implement access controls on log data
+- Document log collection and retention policies
+
+## See Also
+
+- [Logging Integration Documentation](/workspace/source/docs/logging_integration.md)
+- [Analytics Loggers](/awx/main/analytics/)
+- [AWX Settings API](/api/v2/settings/logging/)

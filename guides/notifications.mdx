@@ -1,0 +1,660 @@
+---
+title: Notifications
+description: Configure notification templates to receive alerts about job status in AWX
+---
+
+AWX can send notifications about job status to various channels including email, Slack, webhooks, and more. Notifications help teams stay informed about automation activities and respond quickly to issues.
+
+## Understanding Notifications
+
+The notification system consists of:
+
+- **Notification Templates**: Configured notification channels
+- **Notification Triggers**: When to send (start, success, error)
+- **Notification Messages**: Customizable content with job details
+- **Notification Hierarchy**: Inherited from organizations and projects
+
+### Notification Triggers
+
+<CardGroup cols={3}>
+  <Card title="Started" icon="play">
+    Sent when job starts execution
+  </Card>
+  
+  <Card title="Success" icon="circle-check">
+    Sent when job completes successfully
+  </Card>
+  
+  <Card title="Error/Failure" icon="circle-xmark">
+    Sent when job fails or errors
+  </Card>
+</CardGroup>
+
+## Supported Notification Types
+
+AWX supports these notification channels:
+
+- **Email** - SMTP email notifications
+- **Slack** - Slack channel messages
+- **Mattermost** - Mattermost webhooks
+- **Rocket.Chat** - Rocket.Chat webhooks
+- **Pagerduty** - Pagerduty incident creation
+- **Twilio** - SMS via Twilio
+- **IRC** - IRC channel messages
+- **Webhook** - Custom HTTP webhooks
+- **Grafana** - Grafana annotations
+
+## Creating Email Notifications
+
+<Steps>
+
+<Step title="Create Email Notification Template">
+  <Tabs>
+    <Tab title="Web UI">
+      1. Navigate to **Notification Templates**
+      2. Click **Add**
+      3. Enter details:
+         - **Name**: Descriptive name
+         - **Organization**: Optional organization
+         - **Type**: Email
+      4. Configure email settings:
+         - **Host**: SMTP server hostname
+         - **Port**: SMTP port (25, 465, 587)
+         - **Username**: SMTP username
+         - **Password**: SMTP password
+         - **Sender Email**: From address
+         - **Recipients**: Comma-separated email list
+         - **Use TLS**: Enable for encrypted connection
+      5. Click **Save**
+    </Tab>
+
+    <Tab title="API">
+      ```bash
+      curl -X POST https://awx.example.com/api/v2/notification_templates/ \
+        -H "Authorization: Bearer YOUR_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "Email Alerts",
+          "description": "Email notifications for job failures",
+          "organization": 1,
+          "notification_type": "email",
+          "notification_configuration": {
+            "host": "smtp.example.com",
+            "port": 587,
+            "username": "notifications@example.com",
+            "password": "smtp_password",
+            "sender": "awx@example.com",
+            "recipients": ["team@example.com", "oncall@example.com"],
+            "use_tls": true,
+            "timeout": 30
+          }
+        }'
+      ```
+    </Tab>
+
+    <Tab title="Ansible">
+      ```yaml
+      - name: Create email notification
+        awx.awx.notification_template:
+          name: Email Alerts
+          description: Email notifications for job failures
+          organization: Engineering
+          notification_type: email
+          notification_configuration:
+            host: smtp.example.com
+            port: 587
+            username: notifications@example.com
+            password: "{{ smtp_password }}"
+            sender: awx@example.com
+            recipients:
+              - team@example.com
+              - oncall@example.com
+            use_tls: true
+          state: present
+      ```
+    </Tab>
+  </Tabs>
+</Step>
+
+<Step title="Test the Notification">
+  Send a test notification:
+
+  ```bash
+  curl -X POST https://awx.example.com/api/v2/notification_templates/1/test/ \
+    -H "Authorization: Bearer YOUR_TOKEN"
+  ```
+
+  Or with Ansible:
+
+  ```yaml
+  - name: Test notification
+    awx.awx.notification_template:
+      name: Email Alerts
+      notification_type: email
+      test: true
+      state: present
+  ```
+</Step>
+
+<Step title="Attach to Job Template">
+  ```bash
+  # Attach for error notifications
+  curl -X POST https://awx.example.com/api/v2/job_templates/1/notification_templates_error/ \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"id": 1}'
+
+  # Attach for success notifications
+  curl -X POST https://awx.example.com/api/v2/job_templates/1/notification_templates_success/ \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"id": 1}'
+
+  # Attach for started notifications
+  curl -X POST https://awx.example.com/api/v2/job_templates/1/notification_templates_started/ \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"id": 1}'
+  ```
+</Step>
+
+</Steps>
+
+## Slack Notifications
+
+Integrate with Slack using bot tokens:
+
+```yaml
+- name: Create Slack notification
+  awx.awx.notification_template:
+    name: Slack DevOps Channel
+    organization: Engineering
+    notification_type: slack
+    notification_configuration:
+      token: "{{ slack_bot_token }}"
+      channels:
+        - "#devops"
+        - "#alerts"
+    state: present
+```
+
+### Setting up Slack
+
+<Steps>
+  <Step title="Create Slack App">
+    1. Go to https://api.slack.com/apps
+    2. Click **Create New App**
+    3. Choose **From scratch**
+    4. Name your app (e.g., "AWX Notifications")
+  </Step>
+
+  <Step title="Configure Bot Token">
+    1. Go to **OAuth & Permissions**
+    2. Add Bot Token Scopes:
+       - `chat:write`
+       - `chat:write.public`
+    3. Install app to workspace
+    4. Copy **Bot User OAuth Token**
+  </Step>
+
+  <Step title="Configure AWX">
+    Use the bot token in your notification template:
+
+    ```yaml
+    token: "xoxb-your-bot-token-here"
+    channels:
+      - "#channel-name"
+    ```
+  </Step>
+</Steps>
+
+## Webhook Notifications
+
+Send custom HTTP webhooks:
+
+```yaml
+- name: Create webhook notification
+  awx.awx.notification_template:
+    name: Custom Webhook
+    organization: Engineering
+    notification_type: webhook
+    notification_configuration:
+      url: https://example.com/webhooks/awx
+      http_method: POST
+      headers:
+        Authorization: "Bearer {{ webhook_token }}"
+        Content-Type: application/json
+      disable_ssl_verification: false
+    state: present
+```
+
+### Webhook Payload
+
+AWX sends job details in JSON format:
+
+```json
+{
+  "id": 123,
+  "name": "Deploy Application",
+  "url": "https://awx.example.com/#/jobs/playbook/123",
+  "created_by": "admin",
+  "started": "2026-01-15T10:30:00Z",
+  "finished": "2026-01-15T10:35:00Z",
+  "status": "successful",
+  "traceback": "",
+  "inventory": "Production Servers",
+  "project": "Infrastructure Playbooks",
+  "playbook": "deploy.yml",
+  "credential": "SSH Credential",
+  "limit": "webservers",
+  "extra_vars": "{\"version\": \"2.0.0\"}",
+  "hosts": {
+    "dark": {},
+    "failures": {},
+    "ok": {"web01": 15, "web02": 15},
+    "processed": {"web01": 1, "web02": 1},
+    "skipped": {}
+  }
+}
+```
+
+## Mattermost Notifications
+
+Use incoming webhooks:
+
+```yaml
+- name: Create Mattermost notification
+  awx.awx.notification_template:
+    name: Mattermost Alerts
+    notification_type: mattermost
+    notification_configuration:
+      url: https://mattermost.example.com/hooks/your-webhook-id
+      username: AWX Bot
+      channel: devops
+      icon_url: https://awx.example.com/static/media/logo-header.svg
+    state: present
+```
+
+### Mattermost Setup
+
+1. Go to **Main Menu** → **Integrations** → **Incoming Webhooks**
+2. Click **Add Incoming Webhook**
+3. Configure:
+   - Display Name
+   - Description
+   - Channel (can be overridden in AWX)
+4. Copy the webhook URL
+
+## Pagerduty Integration
+
+Create incidents in Pagerduty:
+
+```yaml
+- name: Create Pagerduty notification
+  awx.awx.notification_template:
+    name: Pagerduty Incidents
+    notification_type: pagerduty
+    notification_configuration:
+      token: "{{ pagerduty_api_key }}"
+      subdomain: your-subdomain
+      service_key: "{{ pagerduty_service_key }}"
+      client_name: AWX
+    state: present
+```
+
+### Pagerduty Setup
+
+1. In Pagerduty, create a new service
+2. Select **Events API V2** integration
+3. Copy the **Integration Key** (use as `service_key`)
+4. Get API token from **User Settings** → **API Access Keys**
+
+## Custom Notification Messages
+
+Customize notification content with Jinja2 templates:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/notification_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Custom Email",
+    "notification_type": "email",
+    "notification_configuration": {
+      "host": "smtp.example.com",
+      "port": 587,
+      "sender": "awx@example.com",
+      "recipients": ["team@example.com"],
+      "use_tls": true
+    },
+    "messages": {
+      "started": {
+        "message": "Job {{ job.name }} started on {{ job.inventory }}",
+        "body": "Started by: {{ job.created_by }}\nPlaybook: {{ job.playbook }}"
+      },
+      "success": {
+        "message": "Job {{ job.name }} completed successfully in {{ job.elapsed }} seconds",
+        "body": "Hosts processed: {{ job.host_status_counts.ok }}\nElapsed: {{ job.elapsed }}s"
+      },
+      "error": {
+        "message": "Job {{ job.name }} failed with status {{ job.status }}",
+        "body": "{{ job.job_explanation }}\n\nCheck: {{ job.url }}"
+      }
+    }
+  }'
+```
+
+### Available Template Variables
+
+Common variables for templates:
+
+```jinja2
+{{ job.name }}                    # Job template name
+{{ job.id }}                      # Job ID
+{{ job.status }}                  # Job status
+{{ job.url }}                     # Job URL
+{{ job.created_by }}              # User who launched
+{{ job.started }}                 # Start timestamp
+{{ job.finished }}                # End timestamp
+{{ job.elapsed }}                 # Duration in seconds
+{{ job.playbook }}                # Playbook name
+{{ job.inventory }}               # Inventory name
+{{ job.limit }}                   # Host limit
+{{ job.extra_vars }}              # Extra variables
+{{ job.job_explanation }}         # Error message
+{{ job.summary_fields.instance_group.name }}  # Instance group
+{{ job.host_status_counts.ok }}   # Successful hosts
+{{ job.host_status_counts.failures }}  # Failed hosts
+{{ job.host_status_counts.dark }}      # Unreachable hosts
+```
+
+## Notification Hierarchy
+
+Notifications inherit from parent resources:
+
+### Job Template Notifications
+
+```yaml
+# Job template inherits from:
+# 1. Job template's own notifications
+# 2. Project's notifications
+# 3. Organization's notifications
+```
+
+### Workflow Notifications
+
+```yaml
+# Workflow inherits from:
+# 1. Workflow template's notifications
+# 2. Organization's notifications
+```
+
+### Example Hierarchy
+
+```yaml
+# Organization-level (all jobs)
+- name: Org-wide error notifications
+  awx.awx.notification_template:
+    name: Org Errors
+    organization: Engineering
+    notification_type: slack
+    notification_configuration:
+      token: "{{ slack_token }}"
+      channels: ["#alerts"]
+    state: present
+
+# Attach to organization
+- name: Attach to organization
+  uri:
+    url: "https://awx.example.com/api/v2/organizations/1/notification_templates_error/"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ awx_token }}"
+    body_format: json
+    body:
+      id: 1
+
+# Project-level (specific project jobs)
+- name: Project notifications
+  awx.awx.notification_template:
+    name: Project Alerts
+    notification_type: email
+    notification_configuration:
+      recipients: ["project-team@example.com"]
+    state: present
+
+# Job template-level (specific job)
+- name: Job-specific notifications
+  awx.awx.notification_template:
+    name: Critical Job Alerts
+    notification_type: pagerduty
+    notification_configuration:
+      service_key: "{{ pagerduty_key }}"
+    state: present
+```
+
+## Attaching Notifications
+
+### To Job Templates
+
+```yaml
+# Attach for failures
+- name: Attach error notification to job template
+  uri:
+    url: "https://awx.example.com/api/v2/job_templates/1/notification_templates_error/"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ awx_token }}"
+    body_format: json
+    body:
+      id: 1
+
+# Attach for success
+- name: Attach success notification
+  uri:
+    url: "https://awx.example.com/api/v2/job_templates/1/notification_templates_success/"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ awx_token }}"
+    body_format: json
+    body:
+      id: 2
+```
+
+### To Projects
+
+```bash
+# Project update notifications
+curl -X POST https://awx.example.com/api/v2/projects/1/notification_templates_error/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 1}'
+```
+
+### To Organizations
+
+```bash
+# Organization-wide notifications
+curl -X POST https://awx.example.com/api/v2/organizations/1/notification_templates_error/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 1}'
+```
+
+### To Workflows
+
+```bash
+curl -X POST https://awx.example.com/api/v2/workflow_job_templates/1/notification_templates_error/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 1}'
+```
+
+## Notification Status
+
+View notification history:
+
+```bash
+# List all notifications
+curl https://awx.example.com/api/v2/notifications/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# View specific notification
+curl https://awx.example.com/api/v2/notifications/123/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Notifications for a job
+curl https://awx.example.com/api/v2/jobs/456/notifications/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Notification statuses:
+- **pending**: Queued for sending
+- **successful**: Sent successfully
+- **failed**: Failed to send
+
+## Advanced Configurations
+
+### Multiple Recipients
+
+```yaml
+notification_configuration:
+  recipients:
+    - team@example.com
+    - oncall@example.com
+    - manager@example.com
+```
+
+### Conditional Notifications
+
+Use different notifications for different job templates:
+
+```yaml
+# Critical jobs - Pagerduty
+- name: Critical job notifications
+  awx.awx.notification_template:
+    name: Critical Alerts
+    notification_type: pagerduty
+    state: present
+
+# Regular jobs - Slack
+- name: Regular job notifications
+  awx.awx.notification_template:
+    name: Regular Alerts
+    notification_type: slack
+    state: present
+```
+
+### Rate Limiting
+
+AWX does not have built-in rate limiting for notifications. Consider:
+- External notification aggregation
+- Webhook endpoints that handle deduplication
+- Scheduled summary reports instead of per-job notifications
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Email notifications not sending">
+    Check:
+    - SMTP credentials are correct
+    - SMTP port is accessible from AWX (telnet test)
+    - TLS/SSL settings match server requirements
+    - Firewall allows outbound SMTP
+    
+    Test notification:
+    ```bash
+    curl -X POST https://awx.example.com/api/v2/notification_templates/1/test/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    
+    # Check notification result
+    curl https://awx.example.com/api/v2/notifications/?notification_template=1 \
+      -H "Authorization: Bearer YOUR_TOKEN" | jq -r '.results[0]'
+    ```
+  </Accordion>
+
+  <Accordion title="Slack notifications failing">
+    Verify:
+    - Bot token is correct and starts with `xoxb-`
+    - Bot has `chat:write` permission
+    - Channel name includes # (e.g., `#devops`)
+    - Bot is invited to private channels
+    
+    Test with curl:
+    ```bash
+    curl -X POST https://slack.com/api/chat.postMessage \
+      -H "Authorization: Bearer YOUR_BOT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"channel": "#devops", "text": "Test"}'
+    ```
+  </Accordion>
+
+  <Accordion title="Webhook notifications returning errors">
+    Debug:
+    - Check webhook URL is accessible
+    - Verify authentication headers
+    - Review webhook endpoint logs
+    - Test with curl:
+    
+    ```bash
+    curl -X POST https://your-webhook-url.com/endpoint \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"test": "message"}'
+    ```
+  </Accordion>
+
+  <Accordion title="Notifications not triggering">
+    Verify:
+    - Notification template is attached to the resource
+    - Correct trigger type (started/success/error)
+    - Notification template is enabled
+    
+    List attached notifications:
+    ```bash
+    # For job template errors
+    curl https://awx.example.com/api/v2/job_templates/1/notification_templates_error/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Hierarchy" icon="layer-group">
+    Set organization-level notifications for common alerts, job-level for specific needs
+  </Card>
+
+  <Card title="Test First" icon="flask">
+    Always test notification templates before attaching to production jobs
+  </Card>
+
+  <Card title="Customize Messages" icon="pen">
+    Use custom messages to provide relevant context and actionable information
+  </Card>
+
+  <Card title="Monitor Delivery" icon="chart-line">
+    Regularly check notification history to ensure delivery success
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Job Templates" icon="play" href="/guides/running-jobs">
+    Create jobs that trigger notifications
+  </Card>
+  
+  <Card title="Workflows" icon="diagram-project" href="/api/overview">
+    Configure notifications for workflows
+  </Card>
+  
+  <Card title="Scheduling" icon="calendar" href="/guides/scheduling">
+    Combine schedules with notifications for automated monitoring
+  </Card>
+  
+  <Card title="Notification API" icon="code" href="/api/overview">
+    Complete API reference for notifications
+  </Card>
+</CardGroup>

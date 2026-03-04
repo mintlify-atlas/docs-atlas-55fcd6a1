@@ -1,0 +1,342 @@
+---
+title: Source Control Integration
+description: Configure Git, Subversion, and other SCM systems with AWX
+---
+
+AWX integrates with source control management (SCM) systems to manage project content including playbooks, roles, and inventory files. Projects in AWX point to SCM repositories and can be configured to update automatically.
+
+## Supported SCM Types
+
+AWX supports the following source control systems:
+
+- **Manual** - Local project files on the AWX server
+- **Git** - Git repositories (most common)
+- **Subversion (SVN)** - SVN repositories
+- **Red Hat Insights** - Red Hat Insights integration
+- **Remote Archive** - Remote tar, zip, or other archive files
+
+## Git Integration
+
+### Basic Configuration
+
+To configure a Git project:
+
+```yaml
+Project Configuration:
+  Name: My Ansible Project
+  Organization: Default
+  SCM Type: Git
+  SCM URL: https://github.com/ansible/ansible-examples.git
+  SCM Branch/Tag/Commit: main
+```
+
+### Git Credentials
+
+For private repositories, create a Source Control credential:
+
+```yaml
+Credential Type: Source Control
+Fields:
+  Username: git-user
+  Password: <token or password>
+  # OR for SSH:
+  SSH Private Key: <paste SSH private key>
+  SSH Key Unlock: <passphrase if key is encrypted>
+```
+
+### Advanced Git Options
+
+#### Branch/Tag/Commit
+
+Specify a specific version to checkout:
+
+```yaml
+SCM Branch: main              # Branch name
+SCM Branch: v2.1.0            # Tag name
+SCM Branch: a1b2c3d4          # Specific commit SHA
+```
+
+#### Refspec
+
+For advanced Git operations, specify a custom refspec:
+
+```yaml
+SCM Refspec: refs/pull/*/head:refs/remotes/origin/pr/*
+```
+
+This allows you to fetch and use pull request branches.
+
+#### Project Options
+
+- **Clean** - Discard local changes before updating (equivalent to `git clean -fdx`)
+- **Delete on Update** - Delete the project directory before syncing
+- **Track Submodules** - Update Git submodules on each project update
+- **Update Revision on Launch** - Automatically update project before running jobs
+- **Allow Branch Override** - Let job templates override the project branch
+
+### SSH Key Authentication
+
+For Git over SSH, configure your credential with an SSH private key:
+
+```yaml
+Credential Configuration:
+  Name: GitHub SSH Key
+  Credential Type: Source Control
+  Username: git
+  SSH Private Key: |
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABFwAAAAdzc2gtcn
+    ...
+    -----END OPENSSH PRIVATE KEY-----
+```
+
+### HTTPS with Personal Access Token
+
+For GitHub, GitLab, or other platforms using tokens:
+
+```yaml
+SCM URL: https://github.com/myorg/myrepo.git
+Credential:
+  Username: oauth2  # or your username
+  Password: ghp_xxxxxxxxxxxxxxxxxxxxx  # Personal Access Token
+```
+
+## Subversion (SVN) Integration
+
+### Configuration
+
+```yaml
+Project Configuration:
+  Name: SVN Project
+  SCM Type: Subversion
+  SCM URL: https://svn.example.com/repos/ansible
+  SCM Branch: trunk  # or branches/dev, tags/v1.0
+```
+
+### SVN Credentials
+
+```yaml
+Credential Type: Source Control
+Fields:
+  Username: svn-user
+  Password: svn-password
+```
+
+## Red Hat Insights Integration
+
+Integrate with Red Hat Insights for vulnerability and compliance scanning:
+
+```yaml
+Project Configuration:
+  Name: Insights Project
+  SCM Type: Red Hat Insights
+  Credential: <Insights Credential>
+```
+
+The Insights credential requires:
+
+```yaml
+Credential Type: Red Hat Insights
+Fields:
+  Username: insights-username
+  Password: insights-password
+```
+
+## Remote Archive Integration
+
+Pull project content from remote archives:
+
+```yaml
+Project Configuration:
+  Name: Archive Project
+  SCM Type: Remote Archive
+  SCM URL: https://example.com/playbooks.tar.gz
+```
+
+Supported formats:
+- `.tar.gz` / `.tgz`
+- `.tar.bz2`
+- `.zip`
+
+## SCM Inventory Sources
+
+Use project content as inventory sources:
+
+```yaml
+Inventory Source Configuration:
+  Name: SCM Inventory
+  Source: Sourced from a Project
+  Project: <select project>
+  Inventory File: inventory/hosts  # relative path in project
+  Update on Project Update: Yes
+```
+
+### Supported Inventory Formats
+
+- **INI format** - Traditional Ansible inventory
+- **YAML format** - Modern YAML-based inventory
+- **Dynamic scripts** - Executable inventory scripts
+- **Inventory plugins** - Ansible inventory plugin YAML files
+
+### Example Project Structure
+
+```
+ansible-project/
+├── playbooks/
+│   ├── site.yml
+│   └── webservers.yml
+├── roles/
+│   └── common/
+├── inventory/
+│   ├── production/
+│   │   ├── hosts
+│   │   ├── group_vars/
+│   │   └── host_vars/
+│   └── staging/
+│       └── hosts
+└── collections/
+    └── requirements.yml
+```
+
+## Project Updates
+
+### Manual Updates
+
+Update a project via the UI or API:
+
+```bash
+curl -X POST https://awx.example.org/api/v2/projects/1/update/ \
+  -H "Authorization: Bearer <token>"
+```
+
+### Automatic Updates
+
+Configure projects to update automatically:
+
+- **Update on Launch** - Update before job template runs
+- **Update on Project Commit** - Use webhooks to trigger updates (GitHub, GitLab)
+- **Scheduled Updates** - Set up scheduled project syncs
+
+### Webhook Configuration
+
+Enable webhook notifications for automatic project updates:
+
+1. In AWX, enable webhooks on the project
+2. Copy the webhook URL and key
+3. Configure in your SCM platform:
+
+**GitHub:**
+```yaml
+Webhook URL: https://awx.example.org/api/v2/webhook/github/
+Content Type: application/json
+Secret: <webhook-key>
+Events: Just the push event
+```
+
+**GitLab:**
+```yaml
+URL: https://awx.example.org/api/v2/webhook/gitlab/
+Secret Token: <webhook-key>
+Trigger: Push events
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**SSH Key Authentication Fails:**
+- Verify the SSH key format (OpenSSH, not PEM)
+- Check key permissions on the Git server
+- Ensure the key is added to authorized_keys or deployment keys
+
+**Git Clone Fails with SSL Error:**
+- Verify SSL certificate on Git server
+- Consider using "Verify SSL" option in project settings
+
+**Submodules Not Updating:**
+- Enable "Track Submodules" in project options
+- Verify submodule URLs are accessible with provided credentials
+
+**Branch Override Not Working:**
+- Ensure "Allow Branch Override" is enabled on project
+- Verify the prompt setting is enabled on job template
+
+### Debug Project Updates
+
+View project update logs:
+
+```bash
+# Get project update job
+curl https://awx.example.org/api/v2/projects/1/project_updates/ \
+  -H "Authorization: Bearer <token>"
+
+# View specific update output
+curl https://awx.example.org/api/v2/project_updates/123/stdout/ \
+  -H "Authorization: Bearer <token>"
+```
+
+## Best Practices
+
+### Repository Organization
+
+- Keep playbooks, roles, and inventory in a clear structure
+- Use `collections/requirements.yml` for Ansible collections
+- Store credentials in AWX, not in the repository
+- Use `.gitignore` to exclude sensitive files
+
+### Branch Strategy
+
+- Use `main` or `master` for production
+- Create feature branches for development
+- Use tags for releases
+- Enable branch override for testing
+
+### Performance
+
+- Use shallow clones for large repositories (Git default)
+- Enable caching when possible
+- Schedule updates during low-usage periods
+- Use webhooks instead of polling
+
+### Security
+
+- Use SSH keys or personal access tokens (not passwords)
+- Rotate credentials regularly
+- Limit credential access via RBAC
+- Enable branch protection in SCM platform
+- Review commit signatures and verification
+
+## API Examples
+
+### Create Git Project
+
+```bash
+curl -X POST https://awx.example.org/api/v2/projects/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Git Project",
+    "organization": 1,
+    "scm_type": "git",
+    "scm_url": "https://github.com/ansible/ansible-examples.git",
+    "scm_branch": "main",
+    "scm_clean": true,
+    "scm_update_on_launch": true,
+    "credential": 5
+  }'
+```
+
+### Update Project
+
+```bash
+curl -X PATCH https://awx.example.org/api/v2/projects/1/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"scm_branch": "develop"}'
+```
+
+## See Also
+
+- [Project Management Documentation](https://docs.ansible.com/automation-controller/latest/html/userguide/projects.html)
+- [Job Branch Overrides](/awx/main/models/projects.py:98)
+- [Webhook Integration](/awx/api/versioning.py)

@@ -1,0 +1,384 @@
+---
+title: 'Schedules'
+description: 'Manage AWX job schedules via the API'
+---
+
+## Overview
+
+Schedules enable automatic execution of job templates and workflow templates at specified times using recurrence rules (rrules).
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/schedules/` | List all schedules |
+| POST | `/api/v2/schedules/` | Create schedule |
+| GET | `/api/v2/schedules/{id}/` | Retrieve schedule |
+| PATCH | `/api/v2/schedules/{id}/` | Update schedule |
+| DELETE | `/api/v2/schedules/{id}/` | Delete schedule |
+| GET | `/api/v2/schedules/preview/` | Preview rrule occurrences |
+| GET | `/api/v2/schedules/zoneinfo/` | Get available timezones |
+
+## List Schedules
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/schedules/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Create Schedule
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/schedules/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Daily Backup",
+    "description": "Run backup every day at 2 AM",
+    "unified_job_template": 10,
+    "rrule": "DTSTART:20240101T020000Z RRULE:FREQ=DAILY;INTERVAL=1",
+    "enabled": true
+  }'
+```
+
+<ParamField body="name" type="string" required>
+  Schedule name
+</ParamField>
+
+<ParamField body="description" type="string">
+  Schedule description
+</ParamField>
+
+<ParamField body="unified_job_template" type="integer" required>
+  Job template or workflow template ID
+</ParamField>
+
+<ParamField body="rrule" type="string" required>
+  iCal recurrence rule (RFC 5545)
+</ParamField>
+
+<ParamField body="enabled" type="boolean" default="true">
+  Whether schedule is active
+</ParamField>
+
+<ParamField body="extra_data" type="object">
+  Additional variables for job launch
+</ParamField>
+
+<ParamField body="inventory" type="integer">
+  Override inventory
+</ParamField>
+
+<ParamField body="limit" type="string">
+  Host limit
+</ParamField>
+
+<ParamField body="scm_branch" type="string">
+  SCM branch override
+</ParamField>
+
+<ParamField body="job_type" type="string">
+  Job type override: `run` or `check`
+</ParamField>
+
+<ParamField body="job_tags" type="string">
+  Ansible tags
+</ParamField>
+
+<ParamField body="skip_tags" type="string">
+  Skip tags
+</ParamField>
+
+<ParamField body="verbosity" type="integer">
+  Verbosity level (0-5)
+</ParamField>
+
+<ParamField body="diff_mode" type="boolean">
+  Enable diff mode
+</ParamField>
+
+<ParamField body="execution_environment" type="integer">
+  Execution environment override
+</ParamField>
+
+<ParamField body="forks" type="integer">
+  Number of forks
+</ParamField>
+
+<ParamField body="job_slice_count" type="integer">
+  Job slice count
+</ParamField>
+
+<ParamField body="timeout" type="integer">
+  Timeout override
+</ParamField>
+
+## Retrieve Schedule
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/schedules/15/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ResponseField name="id" type="integer">
+  Schedule ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Schedule name
+</ResponseField>
+
+<ResponseField name="rrule" type="string">
+  Recurrence rule
+</ResponseField>
+
+<ResponseField name="enabled" type="boolean">
+  Whether schedule is enabled
+</ResponseField>
+
+<ResponseField name="dtstart" type="string">
+  Start datetime from rrule
+</ResponseField>
+
+<ResponseField name="dtend" type="string">
+  End datetime from rrule
+</ResponseField>
+
+<ResponseField name="next_run" type="string">
+  Next scheduled execution
+</ResponseField>
+
+<ResponseField name="timezone" type="string">
+  Timezone for schedule
+</ResponseField>
+
+<ResponseField name="until" type="string">
+  Schedule end date
+</ResponseField>
+
+<ResponseField name="unified_job_template" type="integer">
+  Template ID
+</ResponseField>
+
+<ResponseField name="related" type="object">
+  Links to related resources:
+  - `unified_job_template` - Template details
+  - `jobs` - Jobs created by this schedule
+  - `credentials` - Credential overrides
+  - `labels` - Associated labels
+  - `instance_groups` - Instance group overrides
+</ResponseField>
+
+## Update Schedule
+
+```bash
+curl -X PATCH \
+  https://awx.example.com/api/v2/schedules/15/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": false,
+    "description": "Disabled temporarily"
+  }'
+```
+
+## Delete Schedule
+
+```bash
+curl -X DELETE \
+  https://awx.example.com/api/v2/schedules/15/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Recurrence Rules (rrule)
+
+Schedules use iCalendar recurrence rules (RFC 5545).
+
+### Daily Schedule
+
+```
+DTSTART:20240101T020000Z RRULE:FREQ=DAILY;INTERVAL=1
+```
+
+Runs every day at 2:00 AM UTC.
+
+### Weekly Schedule
+
+```
+DTSTART:20240101T100000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE,FR
+```
+
+Runs every Monday, Wednesday, and Friday at 10:00 AM UTC.
+
+### Monthly Schedule
+
+```
+DTSTART:20240101T000000Z RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=1
+```
+
+Runs on the 1st of each month at midnight UTC.
+
+### With End Date
+
+```
+DTSTART:20240101T120000Z RRULE:FREQ=DAILY;UNTIL=20241231T235959Z
+```
+
+Runs daily until December 31, 2024.
+
+### Limited Occurrences
+
+```
+DTSTART:20240101T150000Z RRULE:FREQ=HOURLY;INTERVAL=6;COUNT=10
+```
+
+Runs every 6 hours for 10 occurrences.
+
+## Preview Schedule
+
+Preview when a schedule will run:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/schedules/preview/?rrule=DTSTART:20240101T020000Z%20RRULE:FREQ=DAILY;INTERVAL=1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ParamField query="rrule" type="string" required>
+  Recurrence rule to preview
+</ParamField>
+
+Returns array of next execution times.
+
+## Available Timezones
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/schedules/zoneinfo/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Returns list of valid timezone names (e.g., `America/New_York`, `Europe/London`).
+
+## Jobs from Schedule
+
+List jobs created by a schedule:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/schedules/15/jobs/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Credentials
+
+Override credentials for scheduled runs:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/schedules/15/credentials/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Labels
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/schedules/15/labels/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Instance Groups
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/schedules/15/instance_groups/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Filtering
+
+```bash
+# By name
+?name__icontains=backup
+
+# By template
+?unified_job_template=10
+
+# Enabled only
+?enabled=true
+
+# By next run time
+?next_run__gte=2024-01-01T00:00:00Z
+```
+
+## Ordering
+
+```bash
+# By next run
+?order_by=next_run
+
+# By name
+?order_by=name
+
+# By creation date
+?order_by=-created
+```
+
+## Complete Example
+
+```python
+import requests
+import json
+from datetime import datetime, timedelta
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Create daily schedule at 3 AM UTC
+start_date = datetime.utcnow().replace(hour=3, minute=0, second=0)
+rrule = f"DTSTART:{start_date.strftime('%Y%m%dT%H%M%SZ')} RRULE:FREQ=DAILY;INTERVAL=1"
+
+schedule_data = {
+    "name": "Daily Database Backup",
+    "description": "Automated daily backup at 3 AM",
+    "unified_job_template": 10,
+    "rrule": rrule,
+    "enabled": True,
+    "extra_data": {
+        "backup_type": "full"
+    }
+}
+
+# Preview schedule
+preview_response = requests.get(
+    f"{base_url}/schedules/preview/",
+    params={"rrule": rrule},
+    headers=headers
+)
+print("Next 5 runs:")
+for run_time in preview_response.json()[:5]:
+    print(f"  {run_time}")
+
+# Create schedule
+response = requests.post(
+    f"{base_url}/schedules/",
+    headers=headers,
+    data=json.dumps(schedule_data)
+)
+
+if response.status_code == 201:
+    schedule = response.json()
+    print(f"\nCreated schedule {schedule['id']}")
+    print(f"Next run: {schedule['next_run']}")
+else:
+    print(f"Error: {response.status_code}")
+    print(response.json())
+```

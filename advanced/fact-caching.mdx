@@ -1,0 +1,357 @@
+---
+title: Fact Caching
+description: Store and retrieve Ansible facts for efficient playbook execution
+icon: database
+---
+
+AWX can store and retrieve per-host facts via an Ansible Fact Cache Plugin, enabling playbooks to access inventory-wide facts even when using `--limit`.
+
+## Overview
+
+Fact caching is configurable on a per-job-template basis. When enabled, AWX serves fact requests for all hosts in an inventory related to the running job.
+
+<Note>
+This allows users to use Job Templates with `--limit` while still having access to the entire Inventory of host facts.
+</Note>
+
+## How It Works
+
+### Fact Cache Implementation
+
+<Steps>
+  <Step title="Fact Injection">
+    When a job launches with `use_fact_cache=True`, AWX writes all `ansible_facts` associated with each host in the inventory as JSON files on the local file system (one file per host)
+  </Step>
+
+  <Step title="Ansible Plugin Usage">
+    Ansible is configured to use the `jsonfile` cache plugin:
+    - `get()` calls result in JSON file lookups for host-specific facts
+    - `set()` calls write JSON files to the local file system
+  </Step>
+
+  <Step title="Cache to Database">
+    When a job with `use_fact_cache=True` finishes:
+    - AWX examines all local JSON files
+    - Files with increased modification times (updated by Ansible) are saved to the database
+    - Only facts newer than `settings.ANSIBLE_FACT_CACHE_TIMEOUT` seconds are injected on subsequent runs
+  </Step>
+</Steps>
+
+## Configuration
+
+### Enabling Fact Cache on Job Templates
+
+Enable fact caching when creating or updating a Job Template:
+
+```bash
+curl -X PATCH https://awx.example.com/api/v2/job_templates/42/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "use_fact_cache": true
+  }'
+```
+
+**Via UI:**
+1. Navigate to Job Templates
+2. Edit the desired template
+3. Enable "Enable Fact Storage"
+4. Save the template
+
+### Fact Cache Timeout
+
+Configure the global fact cache timeout in AWX settings:
+
+```python
+ANSIBLE_FACT_CACHE_TIMEOUT = 86400  # 24 hours in seconds
+```
+
+<Note>
+Facts older than the timeout will not be used from the cache and must be re-gathered.
+</Note>
+
+## Use Cases
+
+### Limited Host Operations
+
+Run playbooks against a subset of hosts while maintaining access to all inventory facts:
+
+```yaml
+- name: Configure web server based on database facts
+  hosts: webservers
+  tasks:
+    - name: Configure database connection
+      template:
+        src: db_config.j2
+        dest: /etc/app/database.conf
+      vars:
+        # Access facts from database hosts even though they're not in limit
+        db_host: "{{ hostvars['db-prod-01']['ansible_default_ipv4']['address'] }}"
+        db_port: "{{ hostvars['db-prod-01']['database_port'] }}"
+```
+
+Launch with limit:
+```bash
+--limit webservers
+```
+
+Database host facts are still available via the fact cache.
+
+### Multi-Tier Applications
+
+Share facts between different tiers:
+
+<Steps>
+  <Step title="Gather Load Balancer Facts">
+    Job Template 1 gathers facts from load balancers
+  </Step>
+  <Step title="Configure Application Servers">
+    Job Template 2 uses LB facts to configure app servers
+  </Step>
+  <Step title="Update Database Config">
+    Job Template 3 uses app server facts to configure database access
+  </Step>
+</Steps>
+
+All templates use the same inventory and have `use_fact_cache=True`.
+
+### Performance Optimization
+
+Skip redundant fact gathering:
+
+```yaml
+- name: Quick deployment
+  hosts: all
+  gather_facts: no  # Use cached facts instead
+  tasks:
+    - name: Deploy application
+      copy:
+        src: "{{ ansible_architecture }}-app-binary"
+        dest: /usr/local/bin/app
+```
+
+<Note>
+With fact caching enabled, you can set `gather_facts: no` to skip the gathering phase and use cached facts, significantly reducing playbook run time.
+</Note>
+
+## Fact Cache Behavior
+
+### When Facts Are Written
+
+Facts are written to the cache:
+- When a playbook runs with `gather_facts: yes` (default)
+- When using the `setup` module explicitly
+- When using the `set_stats` module (for custom facts)
+- When fact cache is enabled on the Job Template
+
+**Jobs with `use_fact_cache=False`:**
+- Will NOT write ansible_facts files
+- Will NOT update the fact cache
+- Cannot access cached facts from other jobs
+
+### When Facts Are Read
+
+Facts are read from the cache:
+- At the start of job execution (if enabled)
+- Only facts newer than `ANSIBLE_FACT_CACHE_TIMEOUT`
+- For all hosts in the inventory, not just hosts in the play
+
+### Fact Invalidation
+
+<Warning>
+Facts are NOT automatically invalidated when:
+- Hosts are modified outside of AWX
+- Infrastructure changes occur
+- Host configurations change
+
+Consider the fact cache timeout carefully based on how dynamic your environment is.
+</Warning>
+
+## Fact Logging
+
+New and changed facts are logged via AWX's logging facility.
+
+**Log Namespace:** `system_tracking`
+
+**Log Payload Includes:**
+- `host_name` - Name of the host
+- `inventory_id` - ID of the inventory
+- `ansible_facts` - Dictionary of all Ansible facts
+
+**Example Log Entry:**
+
+```json
+{
+  "host_name": "web-server-01",
+  "inventory_id": 42,
+  "ansible_facts": {
+    "ansible_default_ipv4": {
+      "address": "192.168.1.100",
+      "interface": "eth0"
+    },
+    "ansible_distribution": "Ubuntu",
+    "ansible_distribution_version": "22.04",
+    "ansible_processor_cores": 4,
+    "ansible_memtotal_mb": 16384
+  }
+}
+```
+
+## Managing Facts
+
+### Viewing Host Facts
+
+Access facts via the API:
+
+```bash
+curl https://awx.example.com/api/v2/hosts/123/ansible_facts/
+```
+
+**Via UI:**
+1. Navigate to Inventories
+2. Select an inventory
+3. Click on Hosts
+4. Select a host
+5. View the "Facts" tab
+
+### Clearing Facts
+
+Clear facts for a specific host:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/hosts/123/ansible_facts/ \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+<Note>
+The `clear_facts` endpoint sets `hosts/<id>/ansible_facts` to `{}`.
+</Note>
+
+### Preventing Fact Clearing
+
+<Warning>
+Setting `gather_facts: False` does NOT result in clearing existing facts. Facts are only cleared when:
+- Explicitly cleared via the API
+- The fact cache timeout is exceeded
+</Warning>
+
+## Integration with Workflows
+
+Fact caching works seamlessly with workflows:
+
+```yaml
+Workflow:
+  1. Discover Infrastructure (gather_facts: yes, use_fact_cache: true)
+     ↓
+  2. Configure Services (gather_facts: no, use_fact_cache: true)
+     ↓
+  3. Deploy Application (gather_facts: no, use_fact_cache: true)
+```
+
+First job gathers and caches facts; subsequent jobs use cached facts for faster execution.
+
+## Custom Facts
+
+Store custom facts using `set_stats`:
+
+```yaml
+- name: Store custom deployment facts
+  set_stats:
+    data:
+      deployment_timestamp: "{{ ansible_date_time.iso8601 }}"
+      deployment_version: "v2.1.0"
+      deployment_user: "{{ ansible_user_id }}"
+```
+
+These custom facts are available in subsequent job runs via the fact cache.
+
+## Performance Considerations
+
+<CardGroup cols={2}>
+  <Card title="Faster Playbooks" icon="gauge-high">
+    Skip fact gathering when using cached facts to reduce playbook run time by 5-30 seconds per host
+  </Card>
+  <Card title="Reduced Load" icon="server">
+    Fewer SSH connections and fact gathering operations reduce load on managed hosts
+  </Card>
+  <Card title="Network Efficiency" icon="network-wired">
+    Less data transfer when facts are served from cache instead of gathering
+  </Card>
+  <Card title="Scalability" icon="chart-line">
+    Large inventories benefit significantly from fact caching
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+### Facts Not Being Cached
+
+<Steps>
+  <Step title="Verify Job Template Setting">
+    Ensure `use_fact_cache` is set to `true` on the Job Template
+  </Step>
+  <Step title="Check Fact Gathering">
+    Verify playbook has `gather_facts: yes` or uses the `setup` module
+  </Step>
+  <Step title="Review Job Output">
+    Check job output for fact gathering task completion
+  </Step>
+  <Step title="Examine Database">
+    Query the API to verify facts are stored: `/api/v2/hosts/<id>/ansible_facts/`
+  </Step>
+</Steps>
+
+### Stale Facts
+
+<Warning>
+If facts appear outdated:
+- Check the `ANSIBLE_FACT_CACHE_TIMEOUT` setting
+- Manually clear facts using the API
+- Run a job with `gather_facts: yes` to refresh
+</Warning>
+
+### Facts Not Available in Playbook
+
+<Note>
+Ensure:
+- Job Template has `use_fact_cache: true`
+- Facts were gathered in a previous job with caching enabled
+- Facts are not older than the cache timeout
+- Hosts are in the same inventory
+</Note>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Set Appropriate Timeouts" icon="clock">
+    Configure cache timeout based on infrastructure change frequency
+  </Card>
+  <Card title="Use gather_facts: no" icon="forward">
+    Skip gathering when using cached facts for better performance
+  </Card>
+  <Card title="Monitor Cache Size" icon="database">
+    Large inventories with many facts can consume significant database space
+  </Card>
+  <Card title="Regular Refreshes" icon="rotate">
+    Periodically run full fact gathering jobs to ensure cache freshness
+  </Card>
+</CardGroup>
+
+## Testing
+
+### Integration Testing Scenarios
+
+<Steps>
+  <Step title="Test Clear Facts">
+    Ensure `clear_facts` sets `hosts/<id>/ansible_facts` to `{}`
+  </Step>
+  <Step title="Test gather_facts: False">
+    Verify that `gather_facts: False` does NOT clear existing facts
+  </Step>
+  <Step title="Test Timeout">
+    Ensure facts older than the timeout are not used from cache
+  </Step>
+  <Step title="Test Multi-Job Workflow">
+    Verify facts from first job are accessible in subsequent jobs
+  </Step>
+</Steps>

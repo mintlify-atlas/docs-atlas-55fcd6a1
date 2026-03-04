@@ -1,0 +1,895 @@
+---
+title: CLI Commands Reference
+description: Complete reference of AWX CLI resources, actions, and arguments
+---
+
+This reference documents all available AWX CLI resources, their actions, and common arguments. The exact list of resources and actions may vary based on your AWX version and permissions.
+
+## Command Discovery
+
+The AWX CLI is self-documenting. Resources and actions are discovered dynamically from the AWX API using HTTP OPTIONS requests.
+
+### List All Resources
+
+```bash
+awx --conf.host https://awx.example.org --help
+```
+
+### Get Resource Details
+
+```bash
+awx <resource> --help
+```
+
+### Get Action Details
+
+```bash
+awx <resource> <action> --help
+```
+
+## Standard Actions
+
+Most resources support these standard CRUD actions:
+
+### list
+
+List all resources of the specified type.
+
+```bash
+awx <resource> list [options]
+```
+
+**Common Options:**
+- `--all` - Fetch all pages (default: first page only)
+- `--order_by FIELD` - Sort by field (prefix with `-` for descending)
+- `-f, --conf.format` - Output format (json, yaml, human, jq)
+- `--filter` - Field filter for output
+
+**Examples:**
+```bash
+awx users list
+awx users list --all
+awx users list --order_by username
+awx users list -f human --filter 'id,username,email'
+```
+
+### get
+
+Retrieve a specific resource by ID or name.
+
+```bash
+awx <resource> get <id|name> [options]
+```
+
+**Arguments:**
+- `id` - Resource ID (integer) or unique name (string)
+
+**Examples:**
+```bash
+awx users get 1
+awx users get alice
+awx projects get 'My Project'
+```
+
+### create
+
+Create a new resource.
+
+```bash
+awx <resource> create [required-args] [optional-args]
+```
+
+**Common Patterns:**
+- Required fields are shown in "required arguments" section
+- Use `--help` to see all available fields
+- JSON/YAML fields accept `@filename` for file input
+
+**Examples:**
+```bash
+awx users create --username bob --password secret --email bob@example.com
+awx projects create --name 'My Project' --organization 1 --scm_type git --scm_url 'https://github.com/example/repo.git'
+```
+
+### modify
+
+Update an existing resource.
+
+```bash
+awx <resource> modify <id|name> [fields-to-update]
+```
+
+**Examples:**
+```bash
+awx users modify alice --email alice@newdomain.com
+awx projects modify 'My Project' --scm_branch main
+```
+
+### delete
+
+Delete a resource.
+
+```bash
+awx <resource> delete <id|name>
+```
+
+**Examples:**
+```bash
+awx users delete bob
+awx projects delete 42
+```
+
+## Common Resources
+
+### users
+
+Manage AWX users.
+
+**Actions:** list, get, create, modify, delete, grant, revoke
+
+**Create Example:**
+```bash
+awx users create \
+    --username alice \
+    --password secret123 \
+    --email alice@example.com \
+    --first_name Alice \
+    --last_name Smith \
+    --is_superuser false
+```
+
+**Grant Role:**
+```bash
+awx users grant alice --organization 1 --role admin
+awx users grant alice --project 'My Project' --role use
+```
+
+### organizations
+
+Manage organizations.
+
+**Actions:** list, get, create, modify, delete, associate, disassociate
+
+**Create Example:**
+```bash
+awx organizations create \
+    --name 'Engineering' \
+    --description 'Engineering team resources'
+```
+
+**Associate Galaxy Credential:**
+```bash
+awx organizations associate 'Engineering' --galaxy_credential 'Ansible Galaxy'
+```
+
+### projects
+
+Manage projects (SCM repositories).
+
+**Actions:** list, get, create, modify, delete, update, associate, disassociate
+
+**Create Example:**
+```bash
+awx projects create \
+    --name 'Web Application' \
+    --organization 'Engineering' \
+    --scm_type git \
+    --scm_url 'https://github.com/example/webapp.git' \
+    --scm_branch main \
+    --scm_update_on_launch true
+```
+
+**Update Project (SCM sync):**
+```bash
+awx projects update 'Web Application'
+awx projects update 'Web Application' --monitor
+```
+
+### inventories
+
+Manage inventories.
+
+**Actions:** list, get, create, modify, delete
+
+**Create Example:**
+```bash
+awx inventories create \
+    --name 'Production' \
+    --organization 'Engineering' \
+    --description 'Production servers'
+```
+
+### hosts
+
+Manage inventory hosts.
+
+**Actions:** list, get, create, modify, delete
+
+**Create Example:**
+```bash
+awx hosts create \
+    --name 'web1.example.com' \
+    --inventory 'Production' \
+    --variables '{"ansible_host": "10.0.1.10"}'
+```
+
+### groups
+
+Manage inventory groups.
+
+**Actions:** list, get, create, modify, delete
+
+**Create Example:**
+```bash
+awx groups create \
+    --name 'webservers' \
+    --inventory 'Production' \
+    --variables '{"http_port": 8080}'
+```
+
+### inventory_sources
+
+Manage dynamic inventory sources.
+
+**Actions:** list, get, create, modify, delete, update
+
+**Create Example:**
+```bash
+awx inventory_sources create \
+    --name 'AWS EC2' \
+    --inventory 'Production' \
+    --source 'ec2' \
+    --credential 'AWS Credential' \
+    --update_on_launch true
+```
+
+**Update Inventory:**
+```bash
+awx inventory_sources update 'AWS EC2' --monitor
+```
+
+### credentials
+
+Manage credentials.
+
+**Actions:** list, get, create, modify, delete
+
+**Machine Credential Example:**
+```bash
+awx credentials create \
+    --name 'SSH Key' \
+    --credential_type 'Machine' \
+    --organization 'Engineering' \
+    --inputs '{"username": "ansible", "ssh_key_data": "@~/.ssh/id_rsa"}'
+```
+
+**Source Control Credential Example:**
+```bash
+awx credentials create \
+    --name 'GitHub Token' \
+    --credential_type 'Source Control' \
+    --organization 'Engineering' \
+    --inputs '{"username": "oauth2", "password": "ghp_xxxxxxxxxxxx"}'
+```
+
+### credential_types
+
+Manage custom credential types.
+
+**Actions:** list, get, create, modify, delete
+
+**Example:**
+```bash
+awx credential_types create \
+    --name 'API Token' \
+    --kind 'cloud' \
+    --inputs '{"fields": [{"id": "api_token", "label": "API Token", "type": "string", "secret": true}]}' \
+    --injectors '{"env": {"API_TOKEN": "{{ api_token }}"}}'
+```
+
+### job_templates
+
+Manage job templates.
+
+**Actions:** list, get, create, modify, delete, launch, associate, disassociate
+
+**Create Example:**
+```bash
+awx job_templates create \
+    --name 'Deploy Application' \
+    --job_type run \
+    --inventory 'Production' \
+    --project 'Web Application' \
+    --playbook 'deploy.yml' \
+    --verbosity 0
+```
+
+**Launch:**
+```bash
+awx job_templates launch 'Deploy Application'
+awx job_templates launch 'Deploy Application' --monitor
+awx job_templates launch 'Deploy Application' --extra_vars '{"version": "1.2.3"}'
+```
+
+**Associate Credential:**
+```bash
+awx job_templates associate 'Deploy Application' --credential 'SSH Key'
+```
+
+### workflow_job_templates
+
+Manage workflow job templates.
+
+**Actions:** list, get, create, modify, delete, launch, associate, disassociate
+
+**Create Example:**
+```bash
+awx workflow_job_templates create \
+    --name 'Deploy Pipeline' \
+    --organization 'Engineering' \
+    --inventory 'Production'
+```
+
+**Launch:**
+```bash
+awx workflow_job_templates launch 'Deploy Pipeline' --monitor
+```
+
+### jobs
+
+View and manage job executions.
+
+**Actions:** list, get, delete, stdout, monitor
+
+**List Recent Jobs:**
+```bash
+awx jobs list --all --order_by '-created' -f human
+```
+
+**Get Job Output:**
+```bash
+awx jobs stdout 123
+```
+
+**Monitor Running Job:**
+```bash
+awx jobs monitor 123
+```
+
+**Cancel Job:**
+```bash
+awx jobs delete 123
+```
+
+### workflow_jobs
+
+View and manage workflow job executions.
+
+**Actions:** list, get, delete, monitor
+
+**Monitor Workflow:**
+```bash
+awx workflow_jobs monitor 456
+```
+
+### ad_hoc_commands
+
+Execute ad hoc commands.
+
+**Actions:** list, get, create, stdout
+
+**Run Ad Hoc Command:**
+```bash
+awx ad_hoc_commands create \
+    --inventory 'Production' \
+    --credential 'SSH Key' \
+    --module_name ping \
+    --limit 'webservers'
+
+awx ad_hoc_commands create \
+    --inventory 'Production' \
+    --credential 'SSH Key' \
+    --module_name command \
+    --module_args 'uptime' \
+    --limit 'all' \
+    --monitor
+```
+
+### teams
+
+Manage teams.
+
+**Actions:** list, get, create, modify, delete, grant, revoke
+
+**Create Example:**
+```bash
+awx teams create \
+    --name 'DevOps' \
+    --organization 'Engineering' \
+    --description 'DevOps team'
+```
+
+**Grant Role:**
+```bash
+awx teams grant 'DevOps' --project 'Web Application' --role admin
+```
+
+### schedules
+
+Manage scheduled jobs.
+
+**Actions:** list, get, create, modify, delete
+
+**Create Example:**
+```bash
+awx schedules create \
+    --name 'Nightly Backup' \
+    --unified_job_template 42 \
+    --rrule 'DTSTART:20260301T020000Z RRULE:FREQ=DAILY;INTERVAL=1' \
+    --enabled true
+```
+
+### notification_templates
+
+Manage notification templates.
+
+**Actions:** list, get, create, modify, delete
+
+**Email Notification Example:**
+```bash
+awx notification_templates create \
+    --name 'Email Alerts' \
+    --notification_type email \
+    --organization 'Engineering' \
+    --notification_configuration '{"host": "smtp.example.com", "recipients": ["alerts@example.com"], "sender": "awx@example.com"}'
+```
+
+**Slack Notification Example:**
+```bash
+awx notification_templates create \
+    --name 'Slack Alerts' \
+    --notification_type slack \
+    --organization 'Engineering' \
+    --notification_configuration '{"token": "xoxb-xxxx", "channels": ["#alerts"]}'
+```
+
+### instances
+
+View AWX instances (Tower/Controller nodes).
+
+**Actions:** list, get
+
+**List Instances:**
+```bash
+awx instances list -f human --filter 'id,hostname,capacity,version'
+```
+
+### instance_groups
+
+Manage instance groups.
+
+**Actions:** list, get, create, modify, delete
+
+**Create Example:**
+```bash
+awx instance_groups create \
+    --name 'High Priority' \
+    --policy_instance_percentage 100
+```
+
+### execution_environments
+
+Manage execution environments.
+
+**Actions:** list, get, create, modify, delete
+
+**Create Example:**
+```bash
+awx execution_environments create \
+    --name 'Custom EE' \
+    --image 'quay.io/ansible/awx-ee:latest' \
+    --organization 'Engineering' \
+    --credential 'Container Registry'
+```
+
+### labels
+
+Manage labels.
+
+**Actions:** list, get, create, modify, delete
+
+**Create Example:**
+```bash
+awx labels create \
+    --name 'production' \
+    --organization 'Engineering'
+```
+
+### roles
+
+View available roles.
+
+**Actions:** list, get
+
+**List Roles:**
+```bash
+awx roles list -f human
+```
+
+### applications
+
+Manage OAuth2 applications.
+
+**Actions:** list, get, create, modify, delete
+
+**Create Example:**
+```bash
+awx applications create \
+    --name 'CI/CD Integration' \
+    --organization 'Engineering' \
+    --authorization_grant_type 'password' \
+    --client_type 'confidential'
+```
+
+## Special Actions
+
+### launch
+
+Available for: job_templates, workflow_job_templates
+
+Launch a job or workflow.
+
+**Options:**
+- `--monitor` - Stream job output
+- `--wait` - Wait for completion without output
+- `--action-timeout SECONDS` - Timeout for monitoring
+- `--interval SECONDS` - Polling interval (min 2.5s)
+- `--extra_vars JSON` - Runtime variables
+- `--limit HOST_PATTERN` - Limit to hosts
+- `--job_tags TAGS` - Run specific tags
+- `--skip_tags TAGS` - Skip specific tags
+
+### update
+
+Available for: projects, inventory_sources
+
+Trigger an SCM update or inventory sync.
+
+**Options:**
+- `--monitor` - Show update progress
+- `--wait` - Wait for completion
+
+### monitor
+
+Available for: jobs, workflow_jobs
+
+Monitor a running or completed job.
+
+```bash
+awx jobs monitor 123
+```
+
+### stdout
+
+Available for: jobs, ad_hoc_commands, project_updates, inventory_updates
+
+Retrieve job output.
+
+```bash
+awx jobs stdout 123
+```
+
+### grant / revoke
+
+Available for: users, teams
+
+Grant or revoke role-based access.
+
+**Options:**
+- `--organization ID|NAME`
+- `--project ID|NAME`
+- `--inventory ID|NAME`
+- `--job_template ID|NAME`
+- `--workflow_job_template ID|NAME`
+- `--credential ID|NAME`
+- `--role ROLE_NAME` (required)
+
+**Available Roles:**
+- admin
+- execute
+- read
+- use
+- update
+- adhoc
+- member
+- auditor
+
+### associate / disassociate
+
+Available for: job_templates, workflow_job_templates, organizations, projects, inventory_sources
+
+Associate or disassociate related resources.
+
+**Examples:**
+```bash
+# Associate credential
+awx job_templates associate 'Deploy' --credential 'SSH Key'
+
+# Associate notification
+awx job_templates associate 'Deploy' --success_notification 'Slack'
+awx job_templates associate 'Deploy' --failure_notification 'Email'
+
+# Disassociate
+awx job_templates disassociate 'Deploy' --credential 'SSH Key'
+```
+
+## Bulk Operations
+
+### bulk
+
+Perform bulk operations.
+
+**Actions:** host_create, host_delete, job_launch
+
+**Bulk Host Create:**
+```bash
+awx bulk host_create \
+    --inventory 'Production' \
+    --hosts '[{"name": "web1"}, {"name": "web2"}, {"name": "web3"}]'
+```
+
+**Bulk Host Delete:**
+```bash
+awx bulk host_delete \
+    --hosts '[{"name": "web1"}, {"name": "web2"}]'
+```
+
+**Bulk Job Launch:**
+```bash
+awx bulk job_launch \
+    --jobs '[{"unified_job_template": 1}, {"unified_job_template": 2}]' \
+    --monitor
+```
+
+## Control Resources
+
+These resources provide metadata and don't follow standard CRUD patterns.
+
+### config
+
+Display current CLI configuration.
+
+```bash
+awx config
+```
+
+### ping
+
+Test API connectivity.
+
+```bash
+awx ping
+```
+
+### me
+
+View current user details.
+
+```bash
+awx me list
+```
+
+### metrics
+
+View system metrics (if enabled).
+
+```bash
+awx metrics list
+awx metrics list -f human
+```
+
+### mesh_visualizer
+
+View mesh topology (AWX with mesh enabled).
+
+```bash
+awx mesh_visualizer list
+```
+
+### settings
+
+View and modify system settings.
+
+**List All Settings:**
+```bash
+awx settings list
+```
+
+**List Settings Category:**
+```bash
+awx settings list --slug authentication
+awx settings list --slug jobs
+awx settings list --slug system
+```
+
+**Modify Setting:**
+```bash
+awx settings modify SESSION_COOKIE_AGE 3600
+awx settings modify TOWER_URL_BASE 'https://awx.example.org'
+```
+
+## Import/Export Commands
+
+### export
+
+Export resources.
+
+**Syntax:**
+```bash
+awx export [--resource [id|name] ...] [-f json|yaml]
+```
+
+**Examples:**
+```bash
+# Export everything
+awx export > backup.json
+
+# Export specific types
+awx export --users --organizations --teams > rbac.json
+
+# Export by name
+awx export --users alice --projects 'My Project' > config.json
+
+# Export by ID
+awx export --job_templates 42 > template.json
+
+# Export in YAML
+awx export -f yaml > backup.yml
+```
+
+**Exportable Resources:**
+- users
+- organizations
+- teams
+- credentials
+- credential_types
+- notification_templates
+- projects
+- inventories
+- inventory_sources
+- job_templates
+- workflow_job_templates
+- schedules
+- labels
+
+### import
+
+Import resources.
+
+**Syntax:**
+```bash
+awx import [-f json|yaml] < input_file
+```
+
+**Examples:**
+```bash
+# Import from JSON
+awx import < backup.json
+
+# Import from YAML
+awx import -f yaml < backup.yml
+```
+
+## Tips for Working with Commands
+
+### Finding Field Names
+
+Use `--help` to discover available fields:
+
+```bash
+awx users create --help
+```
+
+Or use verbose mode to see API schema:
+
+```bash
+awx -v users list | grep -A 50 OPTIONS
+```
+
+### Using IDs vs Names
+
+Most resources accept either ID or unique name:
+
+```bash
+# By ID (faster, but less readable)
+awx projects get 42
+
+# By name (more readable)
+awx projects get 'My Project'
+```
+
+### Lookup by Name in Related Fields
+
+When creating resources with foreign keys:
+
+```bash
+# Reference by ID
+awx job_templates create --project 42 --inventory 10 ...
+
+# Reference by name (CLI resolves to ID)
+awx job_templates create --project 'My Project' --inventory 'Production' ...
+```
+
+### Handling Ambiguous Names
+
+If multiple resources have the same name:
+
+```bash
+# Error: Multiple projects exist with that name
+# Resolution: Use ID or query to find correct one
+awx projects list --name 'My Project' -f human
+awx projects get 42
+```
+
+### Working with Extra Vars
+
+Job templates and workflow templates support extra variables:
+
+```bash
+# Inline JSON
+awx job_templates launch 1 --extra_vars '{"version": "1.2.3"}'
+
+# Short form
+awx job_templates launch 1 -e '{"version": "1.2.3"}'
+
+# From file
+awx job_templates launch 1 --extra_vars @vars.json
+awx job_templates launch 1 --extra_vars @vars.yml
+```
+
+### Working with Variables
+
+Inventories, groups, and hosts support variables:
+
+```bash
+# Inline JSON
+awx hosts create --inventory 1 --name web1 \
+    --variables '{"ansible_host": "10.0.1.10", "http_port": 8080}'
+
+# From file
+awx hosts create --inventory 1 --name web1 --variables @host_vars.yml
+```
+
+## Deprecated Resource Names
+
+The CLI supports backward-compatible aliases for resources (for tower-cli compatibility):
+
+| Current Name | Deprecated Alias |
+|--------------|------------------|
+| ad_hoc_commands | ad_hoc |
+| applications | application |
+| credentials | credential |
+| credential_types | credential_type |
+| groups | group |
+| hosts | host |
+| inventories | inventory (note: plural is current) |
+| inventory_sources | inventory_source |
+| inventory_updates | inventory_update |
+| jobs | job |
+| job_templates | job_template |
+| execution_environments | execution_environment |
+| labels | label |
+| workflow_job_template_nodes | node |
+| notification_templates | notification_template |
+| organizations | organization |
+| projects | project |
+| project_updates | project_update |
+| schedules | schedule |
+| settings | setting |
+| teams | team |
+| workflow_job_templates | workflow |
+| workflow_jobs | workflow_job |
+| users | user |
+
+<Warning>
+  Deprecated aliases are provided for compatibility only. Use the current resource names in new scripts and documentation.
+</Warning>

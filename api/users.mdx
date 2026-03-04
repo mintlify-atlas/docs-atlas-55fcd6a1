@@ -1,0 +1,407 @@
+---
+title: 'Users'
+description: 'Manage AWX users via the API'
+---
+
+## Overview
+
+Users are individual accounts in AWX. They can be members of organizations and teams, and can be granted various roles and permissions.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/users/` | List users |
+| POST | `/api/v2/users/` | Create user |
+| GET | `/api/v2/users/{id}/` | Retrieve user |
+| PATCH | `/api/v2/users/{id}/` | Update user |
+| DELETE | `/api/v2/users/{id}/` | Delete user |
+| GET | `/api/v2/me/` | Get current user |
+
+## List Users
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Create User
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/users/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "jdoe",
+    "first_name": "John",
+    "last_name": "Doe",
+    "email": "jdoe@example.com",
+    "password": "SecurePassword123!",
+    "is_superuser": false,
+    "is_system_auditor": false
+  }'
+```
+
+<ParamField body="username" type="string" required>
+  Unique username for the user
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User password (required for new users)
+</ParamField>
+
+<ParamField body="first_name" type="string">
+  User's first name
+</ParamField>
+
+<ParamField body="last_name" type="string">
+  User's last name
+</ParamField>
+
+<ParamField body="email" type="string">
+  User's email address
+</ParamField>
+
+<ParamField body="is_superuser" type="boolean" default="false">
+  Grant superuser privileges
+</ParamField>
+
+<ParamField body="is_system_auditor" type="boolean" default="false">
+  Grant system auditor role (read-only access to everything)
+</ParamField>
+
+### Password Requirements
+
+Passwords are validated based on AWX settings:
+
+- `LOCAL_PASSWORD_MIN_LENGTH` - Minimum password length
+- `LOCAL_PASSWORD_MIN_DIGITS` - Minimum number of digits
+- `LOCAL_PASSWORD_MIN_UPPER` - Minimum uppercase characters
+- `LOCAL_PASSWORD_MIN_SPECIAL` - Minimum special characters
+
+Additional Django password validators may apply.
+
+## Retrieve User
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Response Schema
+
+<ResponseField name="id" type="integer">
+  User ID
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  Username
+</ResponseField>
+
+<ResponseField name="first_name" type="string">
+  First name
+</ResponseField>
+
+<ResponseField name="last_name" type="string">
+  Last name
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Email address
+</ResponseField>
+
+<ResponseField name="is_superuser" type="boolean">
+  Whether user has superuser privileges
+</ResponseField>
+
+<ResponseField name="is_system_auditor" type="boolean">
+  Whether user has system auditor role
+</ResponseField>
+
+<ResponseField name="password" type="string">
+  Always returns "$encrypted$" for security
+</ResponseField>
+
+<ResponseField name="last_login" type="string">
+  Last login timestamp (read-only)
+</ResponseField>
+
+<ResponseField name="created" type="string">
+  Account creation timestamp
+</ResponseField>
+
+<ResponseField name="modified" type="string">
+  Last modification timestamp
+</ResponseField>
+
+<ResponseField name="related" type="object">
+  Links to related resources:
+  - `teams` - Teams the user belongs to
+  - `organizations` - Organizations the user is a member of
+  - `admin_of_organizations` - Organizations where user is admin
+  - `projects` - Projects user has access to
+  - `credentials` - User's credentials
+  - `roles` - Roles assigned to the user
+  - `activity_stream` - User's activity log
+  - `access_list` - Access list
+</ResponseField>
+
+## Update User
+
+```bash
+curl -X PATCH \
+  https://awx.example.com/api/v2/users/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "newemail@example.com",
+    "first_name": "Jane"
+  }'
+```
+
+### Change Password
+
+```bash
+curl -X PATCH \
+  https://awx.example.com/api/v2/users/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "password": "NewSecurePassword456!"
+  }'
+```
+
+<Info>
+  Users can change their own password. Superusers can change any user's password.
+</Info>
+
+## Delete User
+
+```bash
+curl -X DELETE \
+  https://awx.example.com/api/v2/users/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Current User
+
+Get information about the authenticated user:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/me/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## User Teams
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/teams/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## User Organizations
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/organizations/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Admin of Organizations
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/admin_of_organizations/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## User Projects
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/projects/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## User Credentials
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/credentials/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## User Roles
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/roles/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Activity Stream
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/activity_stream/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Access List
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/access_list/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Personal Access Tokens
+
+### Create Personal Token
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/users/5/personal_tokens/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "API access token",
+    "scope": "write"
+  }'
+```
+
+<ParamField body="description" type="string" required>
+  Token description
+</ParamField>
+
+<ParamField body="scope" type="string" default="write">
+  Token scope: `read` or `write`
+</ParamField>
+
+<ParamField body="application" type="integer">
+  OAuth application ID (null for personal tokens)
+</ParamField>
+
+### List Personal Tokens
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/personal_tokens/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Revoke Personal Token
+
+```bash
+curl -X DELETE \
+  https://awx.example.com/api/v2/users/5/personal_tokens/123/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Filtering
+
+```bash
+# By username
+?username=admin
+
+# By email
+?email__icontains=example.com
+
+# Superusers only
+?is_superuser=true
+
+# System auditors
+?is_system_auditor=true
+
+# Search
+?search=john
+```
+
+## Ordering
+
+```bash
+# By username
+?order_by=username
+
+# By last login
+?order_by=-last_login
+
+# By creation date
+?order_by=-created
+```
+
+## User Types
+
+### Normal Users
+
+Standard users with permissions based on assigned roles.
+
+### Superusers
+
+Users with `is_superuser=true` have full access to all resources and can:
+- Create/modify/delete any resource
+- Grant any permission
+- Access admin interface
+
+### System Auditors
+
+Users with `is_system_auditor=true` have read-only access to all resources.
+
+## Complete Example
+
+```python
+import requests
+import json
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Create user
+user_data = {
+    "username": "automation_user",
+    "first_name": "Automation",
+    "last_name": "User",
+    "email": "automation@example.com",
+    "password": "SecurePassword123!",
+    "is_superuser": False
+}
+
+response = requests.post(
+    f"{base_url}/users/",
+    headers=headers,
+    data=json.dumps(user_data)
+)
+
+if response.status_code == 201:
+    user = response.json()
+    user_id = user['id']
+    print(f"Created user {user_id}")
+    
+    # Create access token for user
+    token_data = {
+        "description": "API Access",
+        "scope": "write"
+    }
+    
+    token_response = requests.post(
+        f"{base_url}/users/{user_id}/personal_tokens/",
+        headers=headers,
+        data=json.dumps(token_data)
+    )
+    
+    if token_response.status_code == 201:
+        token_info = token_response.json()
+        print(f"Token: {token_info['token']}")
+else:
+    print(f"Error: {response.status_code}")
+    print(response.json())
+```

@@ -1,0 +1,629 @@
+---
+title: Ansible Integration
+description: How AWX integrates with and extends Ansible for automation execution
+---
+
+AWX is built on top of Ansible and relies heavily on Ansible's interfaces. This document explains the touchpoints between AWX and Ansible, focusing on how AWX spawns and interacts with Ansible processes.
+
+## Ansible Runner Integration
+
+Much of the code in AWX around Ansible and `ansible-playbook` invocation has been moved to the **ansible-runner** project. AWX now calls out to `ansible-runner` to invoke Ansible.
+
+<Note>
+**ansible-runner** is a separate project that provides a stable interface for running Ansible playbooks and handling their output.
+</Note>
+
+### Why Ansible Runner?
+
+**Benefits:**
+- Separates execution logic from AWX core
+- Provides stable interface for playbook execution
+- Handles process isolation and containerization
+- Manages input/output consistently
+- Reusable by other projects
+
+## Job Execution Lifecycle
+
+### High-Level Flow
+
+```
+AWX Job Launch
+     │
+     ▼
+Task Dispatcher
+ (awx/main/tasks/jobs.py)
+     │
+     ▼
+Prepare Runner Environment
+ - Build temp directory
+ - Populate credentials
+ - Create extra vars
+ - Configure settings
+     │
+     ▼
+Call ansible-runner
+ (Python module interface)
+     │
+     ▼
+ansible-runner spawns
+ ansible-playbook process
+     │
+     ├───── Callback Plugin
+     │      Events → Redis
+     │
+     ▼
+Playbook Execution
+     │
+     ▼
+Job Completion
+ (Cleanup & Status Update)
+```
+
+### Detailed Lifecycle
+
+1. **Task Kicked Off**: A task of a certain job type is started in `awx/main/tasks/jobs.py`
+   - RunJob (Job Template execution)
+   - RunProjectUpdate (SCM update)
+   - RunInventoryUpdate (Inventory sync)
+   - RunAdHocCommand (Ad hoc command)
+
+2. **Build Temp Directory**: A temporary directory is created to house ansible-runner parameters
+   ```
+   /tmp/awx_123_abc/
+   ├── env/
+   │   ├── envvars        # Environment variables
+   │   ├── settings       # Ansible settings
+   │   └── ssh_key        # SSH keys
+   ├── project/          # Project files (playbooks)
+   ├── inventory/        # Inventory files
+   └── artifacts/        # Output artifacts
+   ```
+
+3. **Populate Directory**: Fill with AWX concepts
+   - SSH keys
+   - Extra vars
+   - Environment variables
+   - Credentials
+   - Playbook files
+
+4. **Build Parameters**: Create parameters for `ansible-runner.interface.run()`
+   ```python
+   runner_params = {
+       'private_data_dir': '/tmp/awx_123_abc/',
+       'playbook': 'site.yml',
+       'inventory': '/tmp/awx_123_abc/inventory',
+       'envvars': env_vars,
+       'extravars': extra_vars,
+       'verbosity': verbosity_level,
+       # ... more parameters
+   }
+   ```
+
+5. **Pass Control to ansible-runner**: AWX calls `ansible-runner.interface.run()`
+   - Passes callbacks and handlers
+   - ansible-runner spawns ansible-playbook
+   - Monitors execution
+   - Collects events
+
+6. **Gather Feedback**: Via callbacks and handlers
+
+## Callbacks and Handlers
+
+AWX provides several callbacks to ansible-runner for event handling:
+
+### event_handler
+
+Called each time a new event is created in ansible-runner.
+
+```python
+def event_handler(event_data):
+    """
+    Process Ansible events and dispatch to Redis
+    """
+    # Parse event data
+    event = {
+        'event': event_data['event'],
+        'event_data': event_data,
+        'created': datetime.now(),
+    }
+    
+    # Dispatch to Redis for callback receiver
+    redis_client.publish('awx_events', json.dumps(event))
+```
+
+**Purpose**: AWX dispatches events to Redis to be processed by the callback receiver, which saves them to the database.
+
+### cancel_callback
+
+Called periodically by ansible-runner to check if the job should be canceled.
+
+```python
+def cancel_callback():
+    """
+    Check if job should be canceled
+    """
+    job = Job.objects.get(id=job_id)
+    return job.cancel_flag
+```
+
+**Purpose**: Allows AWX to inform ansible-runner if the job should be canceled. Mainly used for system jobs now; other jobs are canceled via Receptor.
+
+### finished_callback
+
+Called once by ansible-runner when the process finishes.
+
+```python
+def finished_callback(runner_obj):
+    """
+    Handle job completion
+    """
+    # Construct EOF event
+    eof_event = {
+        'event': 'EOF',
+        'final_counter': event_counter,
+        'created': datetime.now(),
+    }
+    
+    # Send to callback receiver
+    redis_client.publish('awx_events', json.dumps(eof_event))
+```
+
+**Purpose**: Signals that the process is complete, including the total number of events observed.
+
+### status_handler
+
+Called as ansible-runner transitions through internal states.
+
+```python
+def status_handler(status_data, runner_config):
+    """
+    Track ansible-runner status transitions
+    """
+    if status_data['status'] == 'starting':
+        # ansible-runner has made all decisions
+        # about the process it will launch
+        
+        # Gather and associate with Job
+        job.job_args = runner_config.command
+        job.job_cwd = runner_config.cwd
+        job.job_env = runner_config.env
+        job.save()
+```
+
+**Purpose**: AWX uses the `starting` status to know that ansible-runner has finalized execution parameters. These are saved for historical observation.
+
+## Spawning Ansible Processes
+
+### CLI Stability
+
+AWX relies on stable interfaces for:
+
+**ansible-playbook**:
+```bash
+ansible-playbook \
+  -i /tmp/inventory \
+  --limit "web_servers" \
+  --forks 5 \
+  --extra-vars "@/tmp/extra_vars.yml" \
+  --vault-password-file /tmp/vault_pass \
+  -vvv \
+  site.yml
+```
+
+**ansible-inventory**:
+```bash
+ansible-inventory \
+  -i inventory.yml \
+  --list \
+  --export
+```
+
+**ansible** (for ad hoc commands):
+```bash
+ansible \
+  -i /tmp/inventory \
+  all \
+  -m shell \
+  -a "uptime"
+```
+
+### Process Monitoring
+
+When spawned:
+- Process runs until completion or timeout
+- Return code, `stdout`, and `stderr` recorded
+- Timeout is configurable per job template
+- Process runs in container/pod for isolation
+
+### Command Construction
+
+AWX builds the command line based on Job Template settings:
+
+```python
+def build_ansible_playbook_command(job):
+    """
+    Build ansible-playbook command from job
+    """
+    cmd = ['ansible-playbook']
+    
+    # Inventory
+    cmd.extend(['-i', job.inventory_path])
+    
+    # Limit
+    if job.limit:
+        cmd.extend(['--limit', job.limit])
+    
+    # Forks
+    if job.forks:
+        cmd.extend(['--forks', str(job.forks)])
+    
+    # Verbosity
+    if job.verbosity:
+        cmd.append('-' + 'v' * job.verbosity)
+    
+    # Extra vars
+    if job.extra_vars:
+        cmd.extend(['--extra-vars', f'@{job.extra_vars_path}'])
+    
+    # Playbook
+    cmd.append(job.playbook)
+    
+    return cmd
+```
+
+## Capturing Event Data
+
+### Callback Plugin
+
+AWX applies an Ansible callback plugin to all spawned processes:
+
+**Location**: `awx/plugins/callback/awx.py`
+
+**Functionality**:
+- Intercepts Ansible events
+- Formats event data as JSON
+- Sends to callback receiver
+- Enables real-time streaming
+
+### Event Flow
+
+```
+Ansible Playbook Running
+        │
+        ▼
+Callback Plugin Intercepts Event
+ (playbook_on_play_start,
+  runner_on_ok, etc.)
+        │
+        ▼
+Format Event as JSON
+        │
+        ▼
+Publish to Redis Queue
+        │
+        ▼
+Callback Receiver Process
+ (awx-manage run_callback_receiver)
+        │
+        ▼
+Save to PostgreSQL
+ (JobEvent table)
+        │
+        ▼
+Broadcast via WebSocket
+        │
+        ▼
+UI Updates in Real-Time
+```
+
+### Event Types
+
+Common Ansible events captured:
+
+- `playbook_on_start`
+- `playbook_on_play_start`
+- `playbook_on_task_start`
+- `runner_on_ok`
+- `runner_on_failed`
+- `runner_on_skipped`
+- `runner_on_unreachable`
+- `playbook_on_stats`
+
+### Event Data Structure
+
+Example event:
+
+```json
+{
+  "event": "runner_on_ok",
+  "event_data": {
+    "host": "web1.example.com",
+    "task": "Install nginx",
+    "res": {
+      "changed": true,
+      "msg": "Package installed"
+    }
+  },
+  "created": "2024-03-04T10:15:30Z",
+  "counter": 42,
+  "uuid": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+AWX relies on stability in:
+- Plugin interface
+- Event hierarchy based on strategy
+- Structure of event data
+
+## Fact Caching
+
+AWX provides custom fact caching to persist facts across job runs.
+
+### How It Works
+
+1. **Ansible playbook runs** with fact caching enabled
+2. **jsonfile cache plugin** writes facts to disk
+   ```
+   /tmp/awx_123_abc/artifacts/fact_cache/
+   ├── web1.example.com
+   ├── web2.example.com
+   └── db1.example.com
+   ```
+3. **After ansible-playbook exits**, AWX consumes the cache
+4. **Facts persisted** to AWX database
+5. **On subsequent runs**, AWX restores cache to filesystem
+6. **New ansible-playbook** uses existing facts
+
+### Configuration
+
+```ini
+[defaults]
+fact_caching = jsonfile
+fact_caching_connection = /tmp/facts
+fact_caching_timeout = 86400
+```
+
+### Benefits
+
+- **Faster playbook runs**: Skip gathering facts if cached
+- **Cross-job persistence**: Facts available to all jobs
+- **Reduced target load**: Less frequent fact gathering
+
+## Environment-Based Configuration
+
+### Credential Injection
+
+AWX injects credentials via environment variables:
+
+```python
+env_vars = {}
+
+# AWS credentials
+if credential.kind == 'aws':
+    env_vars['AWS_ACCESS_KEY_ID'] = credential.username
+    env_vars['AWS_SECRET_ACCESS_KEY'] = credential.password
+
+# Azure credentials
+if credential.kind == 'azure_rm':
+    env_vars['AZURE_SUBSCRIPTION_ID'] = credential.subscription
+    env_vars['AZURE_CLIENT_ID'] = credential.client
+    env_vars['AZURE_SECRET'] = credential.secret
+    env_vars['AZURE_TENANT'] = credential.tenant
+
+# Network credentials
+if credential.kind == 'net':
+    env_vars['ANSIBLE_NET_USERNAME'] = credential.username
+    env_vars['ANSIBLE_NET_PASSWORD'] = credential.password
+```
+
+### Ansible Configuration
+
+AWX sets Ansible configuration via environment:
+
+```python
+env_vars.update({
+    'ANSIBLE_FORCE_COLOR': 'false',
+    'ANSIBLE_HOST_KEY_CHECKING': 'false',
+    'ANSIBLE_SSH_CONTROL_PATH': '/tmp/ssh-%%h-%%p-%%r',
+    'ANSIBLE_STDOUT_CALLBACK': 'awx',
+    'ANSIBLE_RETRY_FILES_ENABLED': 'false',
+    'ANSIBLE_GATHER_TIMEOUT': '30',
+})
+```
+
+### Module Configuration
+
+Module-specific settings:
+
+```python
+# OpenStack
+env_vars['OS_CLIENT_CONFIG_FILE'] = '/tmp/clouds.yml'
+
+# Google Cloud
+env_vars['GCE_EMAIL'] = credential.username
+env_vars['GCE_PROJECT'] = credential.project
+env_vars['GCE_CREDENTIALS_FILE_PATH'] = '/tmp/gce.json'
+
+# VMware
+env_vars['VMWARE_HOST'] = credential.host
+env_vars['VMWARE_USER'] = credential.username
+env_vars['VMWARE_PASSWORD'] = credential.password
+```
+
+AWX relies on stability in these environment variable names across Ansible versions.
+
+## Project Updates
+
+Project updates are also Ansible playbook runs.
+
+### SCM Update Playbook
+
+AWX includes a playbook for SCM operations:
+
+**Location**: `awx/playbooks/project_update.yml`
+
+**Functionality**:
+- Clones git repositories
+- Updates existing checkouts
+- Handles authentication
+- Validates playbook structure
+
+### SCM Credentials
+
+Injected similarly to other credentials:
+
+```python
+# Git with SSH key
+env_vars['GIT_SSH_COMMAND'] = f'ssh -i {ssh_key_path}'
+
+# Git with username/password
+env_vars['GIT_USERNAME'] = credential.username
+env_vars['GIT_PASSWORD'] = credential.password
+
+# Subversion
+env_vars['SVN_USERNAME'] = credential.username
+env_vars['SVN_PASSWORD'] = credential.password
+```
+
+## Inventory Updates
+
+Inventory updates run `ansible-inventory` to fetch inventory data.
+
+### Inventory Sync Process
+
+1. **Create inventory config** (YAML or INI)
+2. **Set up credentials** (environment variables)
+3. **Run ansible-inventory**:
+   ```bash
+   ansible-inventory -i inventory.yml --list --export
+   ```
+4. **Parse JSON output**
+5. **Import to AWX database** as Hosts and Groups
+
+### Inventory Plugins
+
+AWX supports various inventory plugins:
+
+- **Cloud providers**: AWS EC2, Azure, GCP, OpenStack
+- **Virtualization**: VMware, oVirt
+- **Container platforms**: OpenShift, Kubernetes
+- **Custom sources**: Controller (AWX-to-AWX), constructed
+
+### Credential Injection
+
+Inventory credentials injected as environment variables:
+
+```yaml
+# inventory.yml for AWS EC2
+plugin: amazon.aws.aws_ec2
+regions:
+  - us-east-1
+filters:
+  tag:Environment: production
+
+# Credentials from environment:
+# AWS_ACCESS_KEY_ID
+# AWS_SECRET_ACCESS_KEY
+```
+
+## Debugging Ansible Integration
+
+### AWX_PRIVATE_DATA_DIR
+
+To debug ansible-runner:
+
+1. **Set environment variable**:
+   ```bash
+   export AWX_CLEANUP_PATHS=False
+   ```
+
+2. **Run a job**
+
+3. **Find the data directory**:
+   ```python
+   job = Job.objects.get(id=123)
+   print(job.awx_private_data_dir)
+   # Output: /tmp/awx_123_abc
+   ```
+
+4. **Inspect directory** on the execution node
+
+### Job Execution Parameters
+
+To debug the Ansible process:
+
+```python
+job = Job.objects.get(id=123)
+
+print(f"Command: {job.job_args}")
+print(f"Working directory: {job.job_cwd}")
+print(f"Environment: {job.job_env}")
+```
+
+This shows exactly how ansible-playbook was invoked.
+
+### Event Debugging
+
+Check event processing:
+
+```python
+# Count events for a job
+from awx.main.models import JobEvent
+
+events = JobEvent.objects.filter(job_id=123)
+print(f"Total events: {events.count()}")
+
+# Show event types
+for event_type in events.values('event').distinct():
+    count = events.filter(event=event_type['event']).count()
+    print(f"{event_type['event']}: {count}")
+```
+
+## Compatibility Considerations
+
+AWX strives to support multiple Ansible versions, but relies on stability in:
+
+### CLI Interfaces
+
+- `ansible-playbook` arguments and behavior
+- `ansible-inventory` output format
+- `ansible` (ad hoc) command interface
+
+### Callback Plugin Interface
+
+- Plugin method signatures
+- Event data structures
+- Event ordering and hierarchy
+
+### Configuration Options
+
+- Environment variables
+- ansible.cfg settings
+- Module parameters
+
+### Fact Cache Format
+
+- jsonfile cache structure
+- Fact data schema
+
+<Warning>
+When upgrading Ansible, test thoroughly to ensure AWX compatibility, especially around callback plugins and CLI behavior.
+</Warning>
+
+## Execution Environments
+
+Modern AWX uses **Execution Environments** (container images) to run Ansible:
+
+- Consistent Ansible version
+- Bundled collections and dependencies
+- Isolated from AWX control plane
+- Supports multiple Ansible versions simultaneously
+
+See the [Execution Environments documentation](https://docs.ansible.com/automation-controller/latest/html/userguide/execution_environments.html) for more details.
+
+## Next Steps
+
+- [Task Manager System](/development/task-manager)
+- [Dispatcher System](/development/dispatcher)
+- [Architecture Overview](/development/architecture-overview)
+- [Testing AWX](/development/testing)

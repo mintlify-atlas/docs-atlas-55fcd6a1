@@ -1,0 +1,346 @@
+---
+title: 'Bulk API'
+description: 'Perform bulk operations in AWX'
+---
+
+## Overview
+
+Bulk API endpoints allow performing multiple operations in a single request, reducing overhead and improving performance. Based on `docs/bulk_api.md` from the AWX source.
+
+## Available Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/api/v2/bulk/job_launch/` | Launch multiple jobs in one request |
+| `/api/v2/bulk/host_create/` | Create multiple hosts |
+| `/api/v2/bulk/host_delete/` | Delete multiple hosts |
+
+## Bulk Job Launch
+
+Launch multiple jobs in a single request. AWX creates a workflow job with individual jobs as nodes.
+
+### Endpoint
+
+```
+POST /api/v2/bulk/job_launch/
+```
+
+### Basic Example
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/bulk/job_launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Bulk Deploy",
+    "jobs": [
+      {"unified_job_template": 7},
+      {"unified_job_template": 8},
+      {"unified_job_template": 9}
+    ]
+  }'
+```
+
+<ParamField body="name" type="string" required>
+  Name for the bulk job (workflow)
+</ParamField>
+
+<ParamField body="jobs" type="array" required>
+  Array of job definitions
+</ParamField>
+
+<ParamField body="organization" type="integer">
+  Organization to assign to workflow (required for users in multiple orgs)
+</ParamField>
+
+### Job-Level Prompts
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/bulk/job_launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Bulk Deploy with Prompts",
+    "jobs": [
+      {
+        "unified_job_template": 11,
+        "limit": "kansas",
+        "credentials": [1],
+        "inventory": 1
+      },
+      {
+        "unified_job_template": 12,
+        "limit": "texas"
+      }
+    ]
+  }'
+```
+
+Promptable fields (if enabled on template):
+- `inventory`
+- `credentials` (array)
+- `limit`
+- `job_type`
+- `verbosity`
+- `job_tags`
+- `skip_tags`
+- `extra_vars`
+- `diff_mode`
+- `scm_branch`
+
+<Info>
+  Instance groups are not supported at the node level and will be ignored.
+</Info>
+
+### Workflow-Level Prompts
+
+Provide defaults for all jobs:
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/bulk/job_launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Bulk Deploy",
+    "jobs": [
+      {"unified_job_template": 11, "limit": "kansas"},
+      {"unified_job_template": 12},
+      {"unified_job_template": 13}
+    ],
+    "inventory": 2
+  }'
+```
+
+The `inventory: 2` applies to templates 11, 12, and 13 where inventory is promptable.
+
+### Limits
+
+Maximum jobs per request is controlled by `BULK_JOB_MAX_LAUNCH` setting.
+
+### RBAC
+
+**Who can bulk launch?**
+- Any authenticated user
+- Requires `execute` or `update` permission on each template
+
+**Organization assignment:**
+- **Superusers:** Can assign any organization or none
+- **Single org users:** Organization auto-assigned
+- **Multi-org users:** Must specify organization
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/bulk/job_launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Bulk Job Launch",
+    "organization": 2,
+    "jobs": [
+      {"unified_job_template": 12},
+      {"unified_job_template": 13}
+    ]
+  }'
+```
+
+**Who can see bulk jobs?**
+- System admins and org admins see workflow in job lists
+- Regular users see only individual jobs, not the parent workflow
+
+### Response
+
+Returns a workflow job:
+
+```json
+{
+  "id": 50,
+  "type": "workflow_job",
+  "url": "/api/v2/workflow_jobs/50/",
+  "name": "Bulk Deploy",
+  "status": "pending",
+  "workflow_nodes": "/api/v2/workflow_jobs/50/workflow_nodes/"
+}
+```
+
+## Bulk Host Create
+
+Create multiple hosts in an inventory with one request.
+
+### Endpoint
+
+```
+POST /api/v2/bulk/host_create/
+```
+
+### Example
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/bulk/host_create/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inventory": 1,
+    "hosts": [
+      {
+        "name": "host1.example.com",
+        "variables": "ansible_connection: local"
+      },
+      {
+        "name": "host2.example.com",
+        "variables": "ansible_host: 192.168.1.10"
+      },
+      {
+        "name": "host3.example.com"
+      }
+    ]
+  }'
+```
+
+<ParamField body="inventory" type="integer" required>
+  Inventory ID
+</ParamField>
+
+<ParamField body="hosts" type="array" required>
+  Array of host objects with `name` and optional `variables`
+</ParamField>
+
+### Limits
+
+- Maximum hosts per request: `BULK_HOST_MAX_CREATE` (default: 100)
+- Maximum payload size: 1MB (nginx limit)
+
+### Response
+
+```json
+{
+  "hosts": [
+    {"id": 101, "name": "host1.example.com"},
+    {"id": 102, "name": "host2.example.com"},
+    {"id": 103, "name": "host3.example.com"}
+  ]
+}
+```
+
+## Bulk Host Delete
+
+Delete multiple hosts in one request.
+
+### Endpoint
+
+```
+POST /api/v2/bulk/host_delete/
+```
+
+### Example
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/bulk/host_delete/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "hosts": [3, 4, 5, 6, 7, 8, 9, 10]
+  }'
+```
+
+<ParamField body="hosts" type="array" required>
+  Array of host IDs to delete
+</ParamField>
+
+### Limits
+
+- Maximum hosts per request: `BULK_HOST_MAX_DELETE` (default: 250)
+- Maximum payload size: 1MB (nginx limit)
+
+### Response
+
+```json
+{
+  "deleted": 8
+}
+```
+
+## Performance Benefits
+
+Bulk APIs prevent:
+- Overwhelming AWX with rapid individual requests
+- 504 timeout errors from excessive concurrency
+- Excessive database queries and connections
+- Rate limiting issues
+
+<AccordionGroup>
+  <Accordion title="Use Bulk Job Launch">
+    Instead of launching 100 jobs individually, use bulk launch to create a single workflow.
+  </Accordion>
+
+  <Accordion title="Batch Host Operations">
+    When adding/removing many hosts, use bulk endpoints instead of individual API calls.
+  </Accordion>
+
+  <Accordion title="Mind the Limits">
+    Respect `BULK_*_MAX_*` settings to avoid errors. Break large operations into batches.
+  </Accordion>
+</AccordionGroup>
+
+## Complete Example
+
+```python
+import requests
+import json
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Bulk job launch
+job_templates = [10, 11, 12, 13, 14]
+bulk_jobs = {
+    "name": "Deploy All Services",
+    "jobs": [
+        {"unified_job_template": tid, "limit": "production"}
+        for tid in job_templates
+    ],
+    "inventory": 3
+}
+
+response = requests.post(
+    f"{base_url}/bulk/job_launch/",
+    headers=headers,
+    data=json.dumps(bulk_jobs)
+)
+
+if response.status_code in [201, 202]:
+    workflow = response.json()
+    print(f"Launched bulk job workflow {workflow['id']}")
+else:
+    print(f"Error: {response.status_code}")
+    print(response.json())
+
+# Bulk host create
+hosts_to_add = [
+    {"name": f"web{i:02d}.example.com", "variables": f"server_id: {i}"}
+    for i in range(1, 21)
+]
+
+bulk_hosts = {
+    "inventory": 1,
+    "hosts": hosts_to_add
+}
+
+response = requests.post(
+    f"{base_url}/bulk/host_create/",
+    headers=headers,
+    data=json.dumps(bulk_hosts)
+)
+
+if response.status_code == 201:
+    result = response.json()
+    print(f"Created {len(result['hosts'])} hosts")
+```

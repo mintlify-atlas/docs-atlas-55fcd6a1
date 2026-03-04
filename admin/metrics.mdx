@@ -1,0 +1,591 @@
+---
+title: Metrics and Monitoring
+description: Monitor AWX performance and health with Prometheus metrics
+---
+
+## Overview
+
+AWX exposes detailed metrics in Prometheus format via the `/api/v2/metrics` endpoint. These metrics provide visibility into system performance, job execution, resource utilization, and subsystem health.
+
+## Metrics Endpoint
+
+### Access Metrics
+
+```bash
+# Requires superuser or system auditor role
+curl https://awx.example.org/api/v2/metrics \
+  -H "Authorization: Bearer <token>"
+
+# Anonymous access (if enabled)
+curl https://awx.example.org/api/v2/metrics
+```
+
+### Endpoint Parameters
+
+| Parameter | Description | Example |
+|-----------|-------------|----------|
+| `subsystemonly=1` | Show only subsystem metrics | `/api/v2/metrics?subsystemonly=1` |
+| `dbonly=1` | Show only database metrics | `/api/v2/metrics?dbonly=1` |
+
+### Enable Anonymous Access
+
+```bash
+curl -X PATCH https://awx.example.org/api/v2/settings/system/ \
+  -H "Authorization: Bearer <token>" \
+  -d '{"ALLOW_METRICS_FOR_ANONYMOUS_USERS": true}'
+```
+
+<Warning>
+Anonymous metrics access exposes system information. Only enable this in secure, trusted networks or behind authentication at the load balancer level.
+</Warning>
+
+## Subsystem Metrics
+
+The subsystem metrics system provides a flexible framework for collecting and aggregating metrics across AWX components.
+
+### Architecture
+
+```
+┌─────────────────┐
+│ AWX Application │
+│   Components    │
+└────────┬────────┘
+         │ Metrics.inc() / Metrics.set()
+         ▼
+┌─────────────────┐
+│   In-Memory     │  pipe_execute()
+│   Aggregation   │──────────────┐
+└─────────────────┘              │
+                                 ▼
+                         ┌───────────────┐
+                         │     Redis     │
+                         │  awx_metrics  │
+                         └───────┬───────┘
+                                 │
+                                 ▼
+                         ┌───────────────┐
+                         │  /api/v2/     │
+                         │    metrics    │
+                         └───────────────┘
+```
+
+### How Subsystem Metrics Work
+
+1. **Collection**: Components track metrics in memory using `Metrics` objects
+2. **Aggregation**: Metrics accumulate locally to minimize Redis overhead
+3. **Persistence**: Periodically save to Redis via `pipe_execute()`
+4. **Broadcast**: Metrics from each node are stored separately in Redis
+5. **Exposure**: API endpoint reads all node metrics and formats for Prometheus
+
+### Metric Types
+
+#### Incrementing Metrics
+
+**IntM**: Integer counter
+```python
+from awx.main.analytics import subsystem_metrics as s_metrics
+
+m = s_metrics.Metrics()
+m.inc('callback_receiver_events_insert_db', 1)
+m.pipe_execute()  # Save to Redis
+```
+
+**FloatM**: Floating-point counter
+```python
+m.inc('callback_receiver_events_insert_db_seconds', 0.342)
+m.pipe_execute()
+```
+
+#### Set Metrics (Override)
+
+**SetIntM**: Integer value (replaces previous)
+```python
+m.set('callback_receiver_events_queue_size', 150)
+m.pipe_execute()
+```
+
+**SetFloatM**: Float value (replaces previous)
+```python
+m.set('task_manager_last_run_seconds', 2.5)
+m.pipe_execute()
+```
+
+#### Histogram Metrics
+
+**HistogramM**: Observations in buckets
+```python
+m = s_metrics.Metrics(
+    auto_pipe_execute=False,
+    instance_name='awx_1'
+)
+m.inc('callback_receiver_batch_events_insert_db', 45, 'histogram')
+m.pipe_execute()
+```
+
+Generates Prometheus histogram:
+```
+callback_receiver_batch_events_insert_db_bucket{le="10",node="awx_1"} 0
+callback_receiver_batch_events_insert_db_bucket{le="50",node="awx_1"} 1
+callback_receiver_batch_events_insert_db_bucket{le="150",node="awx_1"} 1
+callback_receiver_batch_events_insert_db_count{node="awx_1"} 1
+callback_receiver_batch_events_insert_db_sum{node="awx_1"} 45
+```
+
+### Using Metrics in Code
+
+#### Basic Pattern
+
+```python
+from awx.main.analytics import subsystem_metrics as s_metrics
+
+m = s_metrics.Metrics()
+while processing:
+    # Track events
+    m.inc('my_component_events_processed', 1)
+    
+    # Periodically save
+    if m.should_pipe_execute():
+        m.pipe_execute()
+    
+    if done:
+        break
+
+# Final save
+m.pipe_execute()
+```
+
+#### Thread Safety
+
+<Warning>
+Each thread must create its own `Metrics` object. In-memory operations are not thread-safe, but `pipe_execute()` is thread-safe at the Redis level.
+</Warning>
+
+```python
+import threading
+
+def worker():
+    # Each thread gets its own Metrics instance
+    m = s_metrics.Metrics()
+    m.inc('worker_tasks_completed', 1)
+    m.pipe_execute()  # Thread-safe
+
+threads = [threading.Thread(target=worker) for _ in range(10)]
+for t in threads:
+    t.start()
+```
+
+### Configuration
+
+#### SUBSYSTEM_METRICS_INTERVAL_SAVE_TO_REDIS
+
+**Default**: `2` seconds  
+**Description**: Minimum interval between Redis saves
+
+```python
+# /etc/tower/conf.d/metrics.py
+SUBSYSTEM_METRICS_INTERVAL_SAVE_TO_REDIS = 5  # Save every 5 seconds
+```
+
+#### SUBSYSTEM_METRICS_INTERVAL_SEND_METRICS
+
+**Default**: `3` seconds  
+**Description**: Interval for broadcasting metrics to other nodes
+
+```python
+SUBSYSTEM_METRICS_INTERVAL_SEND_METRICS = 10
+```
+
+#### SUBSYSTEM_METRICS_TASK_MANAGER_RECORD_INTERVAL
+
+**Default**: `15` seconds  
+**Description**: Task manager metrics recording interval
+
+```python
+SUBSYSTEM_METRICS_TASK_MANAGER_RECORD_INTERVAL = 30
+```
+
+<Note>
+Set this to match or exceed your Prometheus scrape interval to avoid unnecessary overhead.
+</Note>
+
+#### SUBSYSTEM_METRICS_BATCH_INSERT_BUCKETS
+
+**Default**: `[10, 50, 150, 350, 650, 2000]`  
+**Description**: Histogram buckets for batch insert metrics
+
+```python
+SUBSYSTEM_METRICS_BATCH_INSERT_BUCKETS = [10, 25, 50, 100, 250, 500, 1000]
+```
+
+## Key Metrics Reference
+
+### Job Execution Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `awx_pending_jobs_total` | Gauge | Jobs waiting to run |
+| `awx_running_jobs_total` | Gauge | Currently executing jobs |
+| `awx_status_<status>_total` | Counter | Jobs by final status |
+| `awx_job_complete_seconds` | Histogram | Job completion time |
+
+### Callback Receiver Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `callback_receiver_events_insert_db` | Counter | Events written to database |
+| `callback_receiver_events_insert_db_seconds` | Counter | Time spent writing events |
+| `callback_receiver_batch_events_insert_db` | Histogram | Events per batch insert |
+| `callback_receiver_events_queue_size` | Gauge | Current event queue size |
+| `callback_receiver_events_processing` | Gauge | Events being processed |
+
+### Task Manager Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `task_manager_last_run_seconds` | Gauge | Last task manager cycle duration |
+| `task_manager_schedule_calls` | Counter | Task manager invocations |
+| `task_manager_jobs_started` | Counter | Jobs started by task manager |
+
+### Database Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `awx_database_connections_total` | Gauge | Active database connections |
+| `awx_database_queries_total` | Counter | Total database queries |
+| `awx_database_query_seconds` | Histogram | Query execution time |
+
+### Instance Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `awx_instance_capacity` | Gauge | Total instance capacity |
+| `awx_instance_consumed_capacity` | Gauge | Used capacity |
+| `awx_instance_remaining_capacity` | Gauge | Available capacity |
+| `awx_instance_cpu_cores` | Gauge | CPU cores |
+| `awx_instance_memory_mb` | Gauge | Total memory (MB) |
+
+## Prometheus Integration
+
+### Prometheus Configuration
+
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'awx'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: '/api/v2/metrics'
+    scheme: https
+    static_configs:
+      - targets: ['awx.example.org']
+    basic_auth:
+      username: 'metrics-user'
+      password: 'secure-password'
+    # OR use bearer token
+    bearer_token: 'your-api-token'
+```
+
+### Multi-Node Cluster
+
+```yaml
+scrape_configs:
+  - job_name: 'awx-cluster'
+    scrape_interval: 15s
+    metrics_path: '/api/v2/metrics'
+    scheme: https
+    static_configs:
+      - targets:
+        - 'awx-node1.example.org'
+        - 'awx-node2.example.org'
+        - 'awx-node3.example.org'
+        labels:
+          cluster: 'production'
+    basic_auth:
+      username: 'metrics'
+      password: 'password'
+```
+
+<Note>
+AWX automatically includes node labels in metrics. Scraping any control node returns metrics from all nodes in the cluster.
+</Note>
+
+### Service Discovery (Kubernetes)
+
+```yaml
+scrape_configs:
+  - job_name: 'awx-k8s'
+    kubernetes_sd_configs:
+      - role: service
+        namespaces:
+          names:
+            - awx
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        action: keep
+        regex: awx-service
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_service_name]
+        target_label: service
+    metrics_path: '/api/v2/metrics'
+    scheme: https
+```
+
+## Grafana Dashboards
+
+### Example Dashboard Panels
+
+#### Job Throughput
+
+```promql
+# Jobs completed per minute
+rate(awx_status_successful_total[5m]) * 60
+```
+
+#### Capacity Utilization
+
+```promql
+# Percentage of capacity used
+(
+  awx_instance_consumed_capacity / awx_instance_capacity
+) * 100
+```
+
+#### Job Queue Depth
+
+```promql
+# Pending jobs by instance group
+sum by (instance_group) (awx_pending_jobs_total)
+```
+
+#### Event Processing Rate
+
+```promql
+# Events per second
+rate(callback_receiver_events_insert_db[1m])
+```
+
+#### Task Manager Performance
+
+```promql
+# Average task manager cycle time
+avg(task_manager_last_run_seconds)
+```
+
+#### P95 Job Completion Time
+
+```promql
+# 95th percentile job duration
+histogram_quantile(0.95, 
+  rate(awx_job_complete_seconds_bucket[5m])
+)
+```
+
+### Dashboard Import
+
+Create a comprehensive Grafana dashboard:
+
+1. **Create metrics user**:
+```bash
+curl -X POST https://awx.example.org/api/v2/users/ \
+  -d '{
+    "username": "metrics",
+    "password": "secure-password",
+    "is_system_auditor": true
+  }'
+```
+
+2. **Configure Prometheus datasource** in Grafana
+
+3. **Import or create dashboard** with panels for:
+   - Job execution rates
+   - Capacity utilization
+   - Queue depths
+   - Event processing
+   - Database performance
+   - Instance health
+
+## Alerting
+
+### Prometheus Alert Rules
+
+```yaml
+# awx-alerts.yml
+groups:
+  - name: awx
+    interval: 30s
+    rules:
+      # High capacity usage
+      - alert: AWXHighCapacityUsage
+        expr: |
+          (awx_instance_consumed_capacity / awx_instance_capacity) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AWX instance {{ $labels.hostname }} capacity high"
+          description: "Instance using {{ $value | humanizePercentage }} capacity"
+      
+      # Job queue backing up
+      - alert: AWXJobQueueBackup
+        expr: |
+          awx_pending_jobs_total > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "AWX job queue has {{ $value }} pending jobs"
+      
+      # Event processing slow
+      - alert: AWXEventProcessingSlow
+        expr: |
+          callback_receiver_events_queue_size > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Event queue size: {{ $value }}"
+      
+      # High failure rate
+      - alert: AWXHighFailureRate
+        expr: |
+          (
+            rate(awx_status_failed_total[5m]) /
+            rate(awx_status_successful_total[5m])
+          ) > 0.1
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AWX job failure rate above 10%"
+      
+      # Instance down
+      - alert: AWXInstanceDown
+        expr: |
+          up{job="awx"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AWX instance {{ $labels.instance }} is down"
+```
+
+## Performance Monitoring
+
+### Job Performance
+
+```bash
+# Average job duration by template
+curl https://awx.example.org/api/v2/jobs/?page_size=1000 | jq '
+  .results | group_by(.job_template) | map({
+    template: .[0].job_template,
+    avg_duration: (map(.elapsed) | add / length)
+  })
+'
+```
+
+### Capacity Trends
+
+```promql
+# Capacity used over time
+avg_over_time(awx_instance_consumed_capacity[1h])
+
+# Peak capacity usage
+max_over_time(awx_instance_consumed_capacity[24h])
+```
+
+### Database Performance
+
+```promql
+# Slow queries
+rate(awx_database_query_seconds_sum[5m]) /
+rate(awx_database_query_seconds_count[5m])
+```
+
+## Direct Redis Access
+
+Inspect raw metrics in Redis:
+
+```bash
+# Connect to Redis
+redis-cli -s /run/redis/redis.sock
+
+# View all metrics for a node
+127.0.0.1:6379> HGETALL awx_metrics
+
+# Get specific metric
+127.0.0.1:6379> HGET awx_metrics callback_receiver_events_insert_db
+
+# View instance metrics
+127.0.0.1:6379> GET awx_metrics_instance_awx_1
+```
+
+## Troubleshooting
+
+### Metrics Endpoint Returns 403
+
+**Cause**: Insufficient permissions
+
+**Solution**:
+```bash
+# Grant system auditor role
+curl -X POST https://awx.example.org/api/v2/users/N/roles/ \
+  -d '{"id": <system-auditor-role-id>}'
+
+# OR enable anonymous access
+curl -X PATCH https://awx.example.org/api/v2/settings/system/ \
+  -d '{"ALLOW_METRICS_FOR_ANONYMOUS_USERS": true}'
+```
+
+### Missing Metrics from Some Nodes
+
+**Cause**: Node not broadcasting metrics
+
+**Solution**:
+```bash
+# Check Redis connectivity
+awx-manage shell -c "from django.core.cache import cache; cache.set('test', 1)"
+
+# Verify cluster communication
+curl https://awx.example.org/api/v2/instances/
+
+# Check for errors in logs
+tail -f /var/log/tower/task.log | grep -i metric
+```
+
+### High Memory Usage from Metrics
+
+**Cause**: Too frequent Redis updates
+
+**Solution**:
+```python
+# /etc/tower/conf.d/metrics.py
+SUBSYSTEM_METRICS_INTERVAL_SAVE_TO_REDIS = 10  # Increase interval
+SUBSYSTEM_METRICS_INTERVAL_SEND_METRICS = 15
+```
+
+### Stale Metrics
+
+**Cause**: Scrape interval mismatch
+
+**Solution**:
+- Ensure Prometheus scrape interval ≤ `SUBSYSTEM_METRICS_TASK_MANAGER_RECORD_INTERVAL`
+- Reduce `SUBSYSTEM_METRICS_INTERVAL_SAVE_TO_REDIS` for fresher data
+
+## Best Practices
+
+1. **Match scrape intervals**: Align Prometheus scrape with AWX metric recording
+2. **Monitor continuously**: Set up alerts for critical metrics
+3. **Baseline performance**: Establish normal operating ranges
+4. **Correlate metrics**: Connect job performance with system resources
+5. **Archive data**: Retain long-term metrics for capacity planning
+6. **Secure access**: Use dedicated service accounts for metric collection
+7. **Document thresholds**: Define what constitutes "normal" for your workload
+8. **Test under load**: Validate metrics accuracy during peak usage
+
+## Related Resources
+
+- [Capacity Planning](/admin/capacity) - Optimize resource usage
+- [Configuration](/admin/configuration) - Configure metric collection
+- [Prometheus Documentation](https://prometheus.io/docs/) - Prometheus setup
+- [Grafana Documentation](https://grafana.com/docs/) - Dashboard creation

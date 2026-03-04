@@ -1,0 +1,537 @@
+---
+title: 'Getting Started with AWX'
+description: 'Quick start guide to install AWX using the AWX Operator and run your first automation job'
+---
+
+# Getting Started with AWX
+
+This guide walks you through installing AWX and running your first automation job, from zero to executing an Ansible playbook in under 30 minutes.
+
+<Note>
+  This guide uses the AWX Operator for installation on Kubernetes. For development setups using Docker Compose, see the [Docker Compose documentation](https://github.com/ansible/awx/blob/devel/tools/docker-compose/README.md).
+</Note>
+
+## Prerequisites
+
+Before installing AWX, ensure you have:
+
+<Steps>
+  <Step title="Kubernetes Cluster">
+    A running Kubernetes cluster (1.21+) or OpenShift cluster. Options include:
+    - **Minikube** (local development): `minikube start --cpus=4 --memory=8g --addons=ingress`
+    - **K3s** (lightweight Kubernetes)
+    - **EKS/AKS/GKE** (managed cloud Kubernetes)
+    - **OpenShift** (Red Hat's Kubernetes distribution)
+  </Step>
+  
+  <Step title="kubectl CLI">
+    Install `kubectl` to interact with your cluster:
+    ```bash
+    # Verify kubectl is installed and cluster is accessible
+    kubectl cluster-info
+    kubectl get nodes
+    ```
+  </Step>
+  
+  <Step title="Kustomize">
+    Install `kustomize` (3.5.1+) for deploying AWX:
+    ```bash
+    # Install kustomize
+    curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+    sudo mv kustomize /usr/local/bin/
+    ```
+  </Step>
+</Steps>
+
+### Cluster Requirements
+
+<Info>
+  **Minimum resources**: 4 CPU cores and 8GB RAM for a basic AWX deployment. Production deployments need significantly more resources depending on workload.
+</Info>
+
+## Installation
+
+### Step 1: Deploy the AWX Operator
+
+The AWX Operator manages AWX installations on Kubernetes using a Custom Resource Definition (CRD).
+
+```bash
+# Create a namespace for AWX
+export NAMESPACE=awx
+kubectl create namespace $NAMESPACE
+
+# Deploy the AWX Operator
+export OPERATOR_VERSION=2.19.1
+kubectl apply -k "https://github.com/ansible/awx-operator/config/default?ref=$OPERATOR_VERSION"
+```
+
+<Tip>
+  Check the [AWX Operator releases](https://github.com/ansible/awx-operator/releases) page for the latest version.
+</Tip>
+
+Verify the operator is running:
+
+```bash
+kubectl get pods -n awx
+# You should see the awx-operator pod running
+```
+
+### Step 2: Configure AWX Instance
+
+Create a configuration file for your AWX instance:
+
+```yaml awx-instance.yaml
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: awx
+  namespace: awx
+spec:
+  # Service type - use NodePort for local/minikube, LoadBalancer for cloud
+  service_type: NodePort
+  
+  # Optional: Set admin user password (otherwise randomly generated)
+  admin_user: admin
+  admin_password_secret: awx-admin-password
+  
+  # PostgreSQL configuration
+  postgres_configuration_secret: awx-postgres-configuration
+  
+  # Optional: Resource limits
+  web_resource_requirements:
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+  
+  task_resource_requirements:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+```
+
+### Step 3: Create Required Secrets
+
+Create secrets for admin password and PostgreSQL:
+
+```bash
+# Create admin password secret
+kubectl create secret generic awx-admin-password \
+  --from-literal=password='MySecurePassword123!' \
+  -n awx
+
+# Create PostgreSQL configuration secret
+kubectl create secret generic awx-postgres-configuration \
+  --from-literal=host=awx-postgres-15 \
+  --from-literal=port=5432 \
+  --from-literal=database=awx \
+  --from-literal=username=awx \
+  --from-literal=password='PostgresPassword123!' \
+  --from-literal=type=managed \
+  -n awx
+```
+
+<Warning>
+  In production, use strong, randomly generated passwords and store them securely. Never commit passwords to version control.
+</Warning>
+
+### Step 4: Deploy AWX
+
+Apply the AWX instance configuration:
+
+```bash
+kubectl apply -f awx-instance.yaml
+```
+
+Watch the deployment progress:
+
+```bash
+# Watch operator logs
+kubectl logs -f deployment/awx-operator-controller-manager -n awx -c awx-manager
+
+# Watch AWX pods
+kubectl get pods -n awx -w
+```
+
+The deployment typically takes 5-10 minutes. You'll see pods starting:
+
+- `awx-postgres-*` - PostgreSQL database
+- `awx-web-*` - Django web server and API
+- `awx-task-*` - Task engine for job execution
+
+### Step 5: Access AWX UI
+
+Once all pods are running, access the AWX web interface:
+
+<Tabs>
+  <Tab title="NodePort (Minikube)">
+    ```bash
+    # Get the NodePort service URL
+    minikube service awx-service -n awx --url
+    
+    # Or manually get the port
+    kubectl get svc awx-service -n awx
+    # Access at http://<node-ip>:<node-port>
+    ```
+  </Tab>
+  
+  <Tab title="LoadBalancer (Cloud)">
+    ```bash
+    # Get the LoadBalancer IP/hostname
+    kubectl get svc awx-service -n awx
+    # Access at the EXTERNAL-IP shown
+    ```
+  </Tab>
+  
+  <Tab title="Port Forward">
+    ```bash
+    # Forward local port 8080 to AWX
+    kubectl port-forward svc/awx-service 8080:80 -n awx
+    # Access at http://localhost:8080
+    ```
+  </Tab>
+</Tabs>
+
+Login with:
+- **Username**: `admin`
+- **Password**: The password you set in the secret (or retrieve it with `kubectl get secret awx-admin-password -n awx -o jsonpath="{.data.password}" | base64 -d`)
+
+<Info>
+  First login may take a moment as the UI assets load. You'll see the AWX dashboard once authentication succeeds.
+</Info>
+
+## Your First Automation Job
+
+Now let's run a simple Ansible playbook through AWX.
+
+### Step 1: Create an Organization
+
+<Steps>
+  <Step title="Navigate to Organizations">
+    In the AWX UI, click **Organizations** in the left navigation menu.
+  </Step>
+  
+  <Step title="Create Organization">
+    Click the **Add** button and fill in:
+    - **Name**: `Demo Organization`
+    - **Description**: `My first AWX organization`
+    
+    Click **Save**.
+  </Step>
+</Steps>
+
+### Step 2: Add a Project
+
+Projects link AWX to your Ansible playbook repositories.
+
+<Steps>
+  <Step title="Navigate to Projects">
+    Click **Projects** in the left navigation.
+  </Step>
+  
+  <Step title="Create Project">
+    Click **Add** and configure:
+    - **Name**: `Demo Project`
+    - **Organization**: Select `Demo Organization`
+    - **Source Control Type**: `Git`
+    - **Source Control URL**: `https://github.com/ansible/ansible-tower-samples.git`
+    - **Update Revision on Launch**: Check this box
+    
+    Click **Save**.
+  </Step>
+  
+  <Step title="Wait for Sync">
+    AWX will automatically sync the playbooks from Git. Watch the **Last Job Status** indicator turn green.
+  </Step>
+</Steps>
+
+<Tip>
+  The ansible-tower-samples repository contains demo playbooks perfect for testing AWX functionality.
+</Tip>
+
+### Step 3: Create an Inventory
+
+Inventories define the hosts your playbooks will run against.
+
+<Steps>
+  <Step title="Navigate to Inventories">
+    Click **Inventories** in the left navigation.
+  </Step>
+  
+  <Step title="Create Inventory">
+    Click **Add** → **Add inventory** and configure:
+    - **Name**: `Demo Inventory`
+    - **Organization**: Select `Demo Organization`
+    
+    Click **Save**.
+  </Step>
+  
+  <Step title="Add a Host">
+    In the inventory details, click the **Hosts** tab, then **Add**:
+    - **Name**: `localhost`
+    - **Variables** (in YAML):
+    ```yaml
+    ansible_connection: local
+    ansible_python_interpreter: /usr/bin/python3
+    ```
+    
+    Click **Save**.
+  </Step>
+</Steps>
+
+### Step 4: Create a Credential
+
+For localhost connections, we'll create a basic machine credential.
+
+<Steps>
+  <Step title="Navigate to Credentials">
+    Click **Credentials** in the left navigation.
+  </Step>
+  
+  <Step title="Create Credential">
+    Click **Add** and configure:
+    - **Name**: `Demo Credential`
+    - **Organization**: Select `Demo Organization`
+    - **Credential Type**: `Machine`
+    
+    For localhost, leave all authentication fields empty.
+    
+    Click **Save**.
+  </Step>
+</Steps>
+
+### Step 5: Create a Job Template
+
+Job templates tie everything together: project, inventory, and credentials.
+
+<Steps>
+  <Step title="Navigate to Templates">
+    Click **Templates** in the left navigation.
+  </Step>
+  
+  <Step title="Create Job Template">
+    Click **Add** → **Add job template** and configure:
+    - **Name**: `Demo Job Template`
+    - **Job Type**: `Run`
+    - **Inventory**: Select `Demo Inventory`
+    - **Project**: Select `Demo Project`
+    - **Playbook**: Select `hello_world.yml`
+    - **Credentials**: Select `Demo Credential`
+    - **Verbosity**: `1 (Verbose)`
+    
+    Click **Save**.
+  </Step>
+</Steps>
+
+### Step 6: Launch Your First Job!
+
+<Steps>
+  <Step title="Launch the Job">
+    From the job template details page, click the **Launch** button (rocket icon).
+  </Step>
+  
+  <Step title="Watch Real-time Output">
+    You'll be redirected to the job details page showing real-time output as the playbook executes. You should see:
+    
+    ```
+    PLAY [Hello World Sample] *************************************
+    
+    TASK [Gathering Facts] ****************************************
+    ok: [localhost]
+    
+    TASK [Hello Message] ******************************************
+    ok: [localhost] => {
+        "msg": "Hello World!"
+    }
+    
+    PLAY RECAP ****************************************************
+    localhost : ok=2 changed=0 unreachable=0 failed=0
+    ```
+  </Step>
+  
+  <Step title="Explore Job Details">
+    After completion, explore the job details:
+    - **Output** tab: Full Ansible playbook output
+    - **Details** tab: Job metadata and statistics
+    - **Host Events** tab: Per-host task results
+  </Step>
+</Steps>
+
+<Info>
+  Congratulations! You've successfully installed AWX and executed your first automation job. 🎉
+</Info>
+
+## Using the AWX CLI
+
+The AWX CLI (`awxkit`) provides command-line access to AWX functionality.
+
+### Install the CLI
+
+```bash
+pip3 install awxkit
+awx --version
+```
+
+### Configure CLI Authentication
+
+```bash
+# Set environment variables
+export TOWER_HOST=https://your-awx-hostname
+export TOWER_USERNAME=admin
+export TOWER_PASSWORD=YourPassword123!
+export TOWER_VERIFY_SSL=false  # Only for testing with self-signed certs
+
+# Or use a config file at ~/.tower_cli.cfg
+cat > ~/.tower_cli.cfg <<EOF
+[general]
+host = https://your-awx-hostname
+username = admin
+password = YourPassword123!
+verify_ssl = false
+EOF
+```
+
+### Common CLI Operations
+
+```bash
+# List job templates
+awx job_template list
+
+# Launch a job
+awx job_template launch <template-id> --monitor
+
+# List recent jobs
+awx job list --order_by=-id --limit=10
+
+# Get job output
+awx job stdout <job-id>
+
+# List inventories
+awx inventory list
+
+# Create a host
+awx host create --name webserver01 --inventory <inventory-id>
+```
+
+<Tip>
+  Use `awx --help` to explore all available commands and options. The CLI mirrors the REST API structure.
+</Tip>
+
+## Next Steps
+
+Now that you have AWX running, explore these advanced features:
+
+<CardGroup cols={2}>
+  <Card title="Configure RBAC" icon="users">
+    Set up teams, users, and granular permissions for your organization
+  </Card>
+  
+  <Card title="Dynamic Inventories" icon="cloud">
+    Automatically populate inventories from AWS, Azure, GCP, or other sources
+  </Card>
+  
+  <Card title="Workflow Jobs" icon="diagram-project">
+    Chain multiple job templates together with conditional logic
+  </Card>
+  
+  <Card title="Job Scheduling" icon="calendar">
+    Schedule jobs to run automatically at specific times or intervals
+  </Card>
+  
+  <Card title="Notifications" icon="bell">
+    Configure Slack, email, or webhook notifications for job results
+  </Card>
+  
+  <Card title="Execution Environments" icon="docker">
+    Use custom container images with specific Ansible versions and dependencies
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<Accordion title="Pods not starting">
+  Check pod logs for errors:
+  ```bash
+  kubectl logs -n awx <pod-name>
+  kubectl describe pod -n awx <pod-name>
+  ```
+  
+  Common issues:
+  - Insufficient cluster resources (CPU/memory)
+  - PostgreSQL connection failures (check secrets)
+  - Image pull errors (check network connectivity)
+</Accordion>
+
+<Accordion title="Can't access AWX UI">
+  Verify the service is running:
+  ```bash
+  kubectl get svc -n awx
+  kubectl get endpoints -n awx
+  ```
+  
+  Check if pods are ready:
+  ```bash
+  kubectl get pods -n awx
+  ```
+  
+  Review web pod logs:
+  ```bash
+  kubectl logs -n awx deployment/awx-web
+  ```
+</Accordion>
+
+<Accordion title="Job fails to run">
+  Common causes:
+  - Missing or invalid credentials
+  - Network connectivity issues from AWX to target hosts
+  - Inventory configuration errors
+  - Playbook syntax errors
+  
+  Check job output in the AWX UI for specific error messages. From the source code (`awx/main/models/unified_jobs.py`), job status can be:
+  - `new` - Job created but not started
+  - `pending` - Waiting for task manager
+  - `waiting` - Assigned to node, about to run
+  - `running` - Currently executing
+  - `successful` - Completed successfully
+  - `failed` - Completed with failures
+  - `error` - Unable to run
+  - `canceled` - Canceled before completion
+</Accordion>
+
+<Accordion title="Database migrations pending indefinitely">
+  If you see repeating "Waiting for postgres to be ready" messages:
+  
+  ```bash
+  # Delete AWX-related containers and volumes
+  kubectl delete namespace awx
+  kubectl create namespace awx
+  
+  # Redeploy from scratch
+  kubectl apply -f awx-instance.yaml
+  ```
+</Accordion>
+
+## Additional Resources
+
+<CardGroup cols={2}>
+  <Card title="AWX Documentation" icon="book" href="https://docs.ansible.com/projects/awx/">
+    Official AWX documentation with comprehensive guides
+  </Card>
+  
+  <Card title="AWX Operator Docs" icon="kubernetes" href="https://github.com/ansible/awx-operator">
+    AWX Operator documentation and configuration options
+  </Card>
+  
+  <Card title="Ansible Forum" icon="comments" href="https://forum.ansible.com/tag/awx">
+    Community support and discussions
+  </Card>
+  
+  <Card title="Architecture Guide" icon="diagram-project" href="/architecture">
+    Deep dive into AWX architecture and components
+  </Card>
+</CardGroup>

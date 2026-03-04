@@ -1,0 +1,118 @@
+---
+title: Integration Overview
+description: Connect AWX with external systems and services
+---
+
+AWX provides extensive integration capabilities to connect with source control systems, cloud providers, logging platforms, and notification services. These integrations enable seamless automation workflows across your infrastructure.
+
+## Integration Types
+
+### Source Control Management
+
+AWX integrates with version control systems to manage playbooks, inventory files, and project content:
+
+- **Git** - Full support for Git repositories with branch, tag, and refspec options
+- **Subversion (SVN)** - Integration with SVN repositories
+- **Red Hat Insights** - Direct integration with Red Hat Insights
+- **Remote Archives** - Support for remote archive files
+
+See [Source Control Integration](/integrations/source-control) for detailed configuration.
+
+### Cloud Providers
+
+Dynamic inventory sources from major cloud platforms:
+
+- **Amazon Web Services (AWS)** - EC2 dynamic inventory
+- **Microsoft Azure** - Azure Resource Manager inventory
+- **Google Cloud Platform (GCP)** - Google Compute Engine inventory
+- **VMware** - vCenter and ESXi inventory sources
+- **Red Hat Virtualization (RHV)** - OpenStack and RHV inventory
+- **OpenShift Virtualization** - Container platform inventory
+- **Terraform** - Terraform state file integration
+
+See [Cloud Provider Integration](/integrations/cloud-providers) for credential and inventory configuration.
+
+### Log Aggregation
+
+Send AWX logs and analytics to external platforms:
+
+- **Splunk** - Enterprise log aggregation
+- **Elastic Stack (ELK)** - Elasticsearch, Logstash, Kibana
+- **Sumologic** - Cloud-based log management
+- **Loggly** - Cloud logging service
+
+See [Logging Integration](/integrations/logging) for setup instructions.
+
+### Notification Services
+
+Receive alerts about job status and workflow events:
+
+- **Email** - SMTP-based email notifications
+- **Slack** - Real-time Slack channel notifications
+- **PagerDuty** - Incident management integration
+- **Webhooks** - Custom HTTP/HTTPS endpoints
+- **Mattermost** - Self-hosted messaging platform
+- **Rocket.Chat** - Open source team communication
+- **IRC** - Internet Relay Chat notifications
+- **Grafana** - Annotation-based monitoring integration
+- **Twilio** - SMS notifications
+- **AWS SNS** - Amazon Simple Notification Service
+
+See [Notification Integration](/integrations/notifications) for configuration details.
+
+## Credential Management
+
+All integrations use AWX's credential system to securely store authentication details. Credentials can be:
+
+- Encrypted at rest using AES-256 encryption
+- Sourced from external secret management systems (HashiCorp Vault, Azure Key Vault)
+- Scoped to organizations, teams, or users with role-based access control
+- Reused across multiple projects and job templates
+
+## API Access
+
+All integration configurations are accessible via the AWX REST API:
+
+```bash
+# List credential types
+curl -X GET https://awx.example.org/api/v2/credential_types/ \
+  -H "Authorization: Bearer <token>"
+
+# List notification templates
+curl -X GET https://awx.example.org/api/v2/notification_templates/ \
+  -H "Authorization: Bearer <token>"
+
+# List inventory sources
+curl -X GET https://awx.example.org/api/v2/inventory_sources/ \
+  -H "Authorization: Bearer <token>"
+```
+
+## Best Practices
+
+### Security
+
+- Use credential input sources for dynamic secret retrieval
+- Rotate credentials regularly
+- Apply least privilege principle to credential access
+- Enable SSL/TLS verification for external connections
+
+### Performance
+
+- Cache inventory updates when possible
+- Use webhook notifications for real-time alerts instead of polling
+- Configure appropriate timeout values
+- Limit log aggregation to necessary data sources
+
+### Reliability
+
+- Test notification templates before production use
+- Configure retry logic for transient failures
+- Monitor integration health through AWX metrics
+- Set up fallback notification channels
+
+## Next Steps
+
+- [Configure Source Control](/integrations/source-control)
+- [Set Up Cloud Inventory](/integrations/cloud-providers)
+- [Enable Log Aggregation](/integrations/logging)
+- [Create Notification Templates](/integrations/notifications)

@@ -1,0 +1,557 @@
+---
+title: 'Projects'
+description: 'Manage AWX projects via the API'
+---
+
+## Overview
+
+Projects in AWX represent source control repositories containing Ansible playbooks. They synchronize content from Git, Subversion, or other SCM systems.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/projects/` | List projects |
+| POST | `/api/v2/projects/` | Create project |
+| GET | `/api/v2/projects/{id}/` | Retrieve project |
+| PATCH | `/api/v2/projects/{id}/` | Update project |
+| DELETE | `/api/v2/projects/{id}/` | Delete project |
+| POST | `/api/v2/projects/{id}/update/` | Trigger SCM update |
+| POST | `/api/v2/projects/{id}/copy/` | Copy project |
+
+## List Projects
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Create Project
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/projects/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Ansible Playbooks",
+    "description": "Main playbook repository",
+    "organization": 1,
+    "scm_type": "git",
+    "scm_url": "https://github.com/ansible/ansible-examples.git",
+    "scm_branch": "master",
+    "scm_clean": false,
+    "scm_delete_on_update": false,
+    "credential": null,
+    "timeout": 0,
+    "scm_track_submodules": false
+  }'
+```
+
+<ParamField body="name" type="string" required>
+  Project name (unique within organization)
+</ParamField>
+
+<ParamField body="description" type="string">
+  Project description
+</ParamField>
+
+<ParamField body="organization" type="integer" required>
+  Organization ID
+</ParamField>
+
+<ParamField body="scm_type" type="string" default="">
+  Source control type: `git`, `svn`, `insights`, `archive`, or empty for manual
+</ParamField>
+
+<ParamField body="scm_url" type="string">
+  SCM repository URL (required if scm_type is set)
+</ParamField>
+
+<ParamField body="scm_branch" type="string" default="">
+  SCM branch, tag, or commit to checkout
+</ParamField>
+
+<ParamField body="scm_refspec" type="string" default="">
+  Git refspec for advanced SCM operations
+</ParamField>
+
+<ParamField body="scm_clean" type="boolean" default="false">
+  Discard local changes before syncing
+</ParamField>
+
+<ParamField body="scm_delete_on_update" type="boolean" default="false">
+  Delete repository on update
+</ParamField>
+
+<ParamField body="scm_track_submodules" type="boolean" default="false">
+  Track Git submodules
+</ParamField>
+
+<ParamField body="credential" type="integer">
+  SCM credential ID for authentication
+</ParamField>
+
+<ParamField body="timeout" type="integer" default="0">
+  Update timeout in seconds (0 = no timeout)
+</ParamField>
+
+<ParamField body="local_path" type="string">
+  Local path for manual projects (read-only for SCM projects)
+</ParamField>
+
+<ParamField body="scm_update_on_launch" type="boolean" default="false">
+  Update repository before running jobs
+</ParamField>
+
+<ParamField body="scm_update_cache_timeout" type="integer" default="0">
+  Cache timeout for project updates (seconds)
+</ParamField>
+
+<ParamField body="allow_override" type="boolean" default="false">
+  Allow changing branch per job template
+</ParamField>
+
+<ParamField body="default_environment" type="integer">
+  Default execution environment ID
+</ParamField>
+
+## Retrieve Project
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Response Schema
+
+<ResponseField name="id" type="integer">
+  Project ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Project name
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Project description
+</ResponseField>
+
+<ResponseField name="scm_type" type="string">
+  SCM type: `git`, `svn`, `insights`, `archive`, or empty
+</ResponseField>
+
+<ResponseField name="scm_url" type="string">
+  Repository URL
+</ResponseField>
+
+<ResponseField name="scm_branch" type="string">
+  Branch/tag/commit
+</ResponseField>
+
+<ResponseField name="scm_refspec" type="string">
+  Git refspec
+</ResponseField>
+
+<ResponseField name="scm_clean" type="boolean">
+  Whether to discard local changes
+</ResponseField>
+
+<ResponseField name="scm_delete_on_update" type="boolean">
+  Whether to delete repo on update
+</ResponseField>
+
+<ResponseField name="scm_track_submodules" type="boolean">
+  Whether to track submodules
+</ResponseField>
+
+<ResponseField name="scm_update_on_launch" type="boolean">
+  Whether to update before job launch
+</ResponseField>
+
+<ResponseField name="scm_update_cache_timeout" type="integer">
+  Update cache timeout
+</ResponseField>
+
+<ResponseField name="allow_override" type="boolean">
+  Whether job templates can override branch
+</ResponseField>
+
+<ResponseField name="timeout" type="integer">
+  Update timeout
+</ResponseField>
+
+<ResponseField name="scm_revision" type="string">
+  Latest SCM revision (read-only)
+</ResponseField>
+
+<ResponseField name="last_job_run" type="string">
+  Last update timestamp
+</ResponseField>
+
+<ResponseField name="last_job_failed" type="boolean">
+  Whether last update failed
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Project status: `new`, `pending`, `waiting`, `running`, `successful`, `failed`, `error`, `canceled`, `never updated`, `ok`, `missing`
+</ResponseField>
+
+<ResponseField name="organization" type="integer">
+  Organization ID
+</ResponseField>
+
+<ResponseField name="related" type="object">
+  Links to related resources:
+  - `organization` - Parent organization
+  - `credential` - SCM credential
+  - `default_environment` - Default execution environment
+  - `playbooks` - Available playbooks
+  - `inventories` - SCM-based inventories
+  - `scm_inventory_sources` - Inventory sources using this project
+  - `teams` - Teams with access
+  - `project_updates` - Update history
+  - `update` - Trigger update endpoint
+  - `schedules` - Update schedules
+  - `activity_stream` - Activity log
+  - `notification_templates_*` - Notification templates
+  - `access_list` - Access list
+  - `object_roles` - Available roles
+  - `copy` - Copy endpoint
+</ResponseField>
+
+## Update Project
+
+```bash
+curl -X PATCH \
+  https://awx.example.com/api/v2/projects/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scm_branch": "develop",
+    "scm_update_on_launch": true
+  }'
+```
+
+## Delete Project
+
+```bash
+curl -X DELETE \
+  https://awx.example.com/api/v2/projects/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Trigger Project Update
+
+Manually sync the project from SCM:
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/projects/5/update/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Returns a project_update job that you can monitor.
+
+## Copy Project
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/projects/5/copy/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Ansible Playbooks Copy"
+  }'
+```
+
+## List Playbooks
+
+Get available playbooks in the project:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/playbooks/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Returns an array of playbook filenames.
+
+## List Project Inventories
+
+Get SCM-based inventories:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/inventories/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Project Updates
+
+### List Project Updates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/project_updates/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Get Latest Update
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/projects/5/project_updates/?order_by=-created&page_size=1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Project Schedules
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/schedules/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Project Teams
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/teams/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Notification Templates
+
+### Started Notifications
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/notification_templates_started/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Success Notifications
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/notification_templates_success/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Error Notifications
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/notification_templates_error/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Object Roles
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/object_roles/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Available roles:
+- **admin_role** - Full project administration
+- **use_role** - Use project in job templates
+- **update_role** - Trigger project updates
+- **read_role** - View project details
+
+## Activity Stream
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/activity_stream/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Access List
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/projects/5/access_list/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## SCM Types
+
+### Git
+
+```json
+{
+  "scm_type": "git",
+  "scm_url": "https://github.com/org/repo.git",
+  "scm_branch": "main",
+  "scm_refspec": "refs/pull/*/head:refs/remotes/origin/pr/*"
+}
+```
+
+### Subversion
+
+```json
+{
+  "scm_type": "svn",
+  "scm_url": "https://svn.example.com/repo",
+  "scm_branch": "trunk"
+}
+```
+
+### Archive
+
+```json
+{
+  "scm_type": "archive",
+  "scm_url": "https://example.com/playbooks.tar.gz"
+}
+```
+
+### Manual
+
+```json
+{
+  "scm_type": "",
+  "local_path": "_manual_project_path_"
+}
+```
+
+## Filtering
+
+```bash
+# By name
+?name__icontains=ansible
+
+# By organization
+?organization=1
+
+# By SCM type
+?scm_type=git
+
+# By status
+?status=successful
+
+# Failed projects
+?last_job_failed=true
+```
+
+## Ordering
+
+```bash
+# By name
+?order_by=name
+
+# By last update
+?order_by=-last_job_run
+
+# By status
+?order_by=status
+```
+
+## Complete Example
+
+```python
+import requests
+import json
+import time
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Create project
+project_data = {
+    "name": "Infrastructure Playbooks",
+    "description": "Infrastructure automation",
+    "organization": 1,
+    "scm_type": "git",
+    "scm_url": "https://github.com/example/playbooks.git",
+    "scm_branch": "main",
+    "scm_update_on_launch": True,
+    "scm_clean": True
+}
+
+response = requests.post(
+    f"{base_url}/projects/",
+    headers=headers,
+    data=json.dumps(project_data)
+)
+
+if response.status_code == 201:
+    project = response.json()
+    project_id = project['id']
+    print(f"Created project {project_id}")
+    
+    # Trigger initial sync
+    update_response = requests.post(
+        f"{base_url}/projects/{project_id}/update/",
+        headers=headers
+    )
+    
+    if update_response.status_code in [200, 202]:
+        update_job = update_response.json()
+        update_id = update_job['id']
+        
+        # Poll update status
+        while True:
+            status_response = requests.get(
+                f"{base_url}/project_updates/{update_id}/",
+                headers=headers
+            )
+            status = status_response.json()['status']
+            
+            print(f"Update status: {status}")
+            
+            if status in ['successful', 'failed', 'error', 'canceled']:
+                break
+            
+            time.sleep(2)
+        
+        # List playbooks
+        playbooks = requests.get(
+            f"{base_url}/projects/{project_id}/playbooks/",
+            headers=headers
+        ).json()
+        
+        print(f"Available playbooks: {playbooks}")
+else:
+    print(f"Error: {response.status_code}")
+    print(response.json())
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use SCM Update on Launch">
+    Enable `scm_update_on_launch` to ensure playbooks are up-to-date before job runs.
+  </Accordion>
+
+  <Accordion title="Set Update Cache Timeout">
+    Use `scm_update_cache_timeout` to avoid excessive SCM updates:
+    ```json
+    {"scm_update_cache_timeout": 300}
+    ```
+  </Accordion>
+
+  <Accordion title="Use Branch Override">
+    Enable `allow_override` to let job templates specify different branches.
+  </Accordion>
+
+  <Accordion title="Secure Credentials">
+    Use SCM credentials for private repositories:
+    ```json
+    {"credential": 5}
+    ```
+  </Accordion>
+
+  <Accordion title="Monitor Update Jobs">
+    Always monitor project_update jobs to catch sync failures early.
+  </Accordion>
+</AccordionGroup>

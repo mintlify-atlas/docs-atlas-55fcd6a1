@@ -1,0 +1,374 @@
+---
+title: Container Groups
+description: Execute jobs in ephemeral containers on Kubernetes or OpenShift
+icon: docker
+---
+
+Container Groups enable AWX to provision job environments on-demand as Pods that exist only for the duration of the playbook run, providing a clean, isolated execution environment for every job.
+
+## Overview
+
+In a traditional AWX installation, jobs (ansible-playbook runs) are executed directly on cluster members. Container Groups introduce an **ephemeral execution model** that ensures a clean environment for every job run.
+
+### Execution Models
+
+<CardGroup cols={2}>
+  <Card title="Ephemeral" icon="clock">
+    Pods created on-demand, exist only during job execution
+  </Card>
+  <Card title="Always-On" icon="circle-check">
+    Manually created instances that persist beyond individual jobs
+  </Card>
+</CardGroup>
+
+## Configuration
+
+A `ContainerGroup` is an `InstanceGroup` that has an associated Credential for connecting to an OpenShift or Kubernetes cluster.
+
+### Prerequisites
+
+<Steps>
+  <Step title="Kubernetes/OpenShift Access">
+    Ensure AWX can reach your Kubernetes or OpenShift cluster API
+  </Step>
+  <Step title="Container Credential">
+    Create credentials with appropriate authentication method
+  </Step>
+  <Step title="Namespace Permissions">
+    Verify permissions to create pods in target namespace
+  </Step>
+</Steps>
+
+### Create Container Credential
+
+A `Credential` must be created where the associated `CredentialType` is one of:
+
+<CardGroup cols={3}>
+  <Card title="OpenShift User/Pass" icon="key">
+    `openshift_username_password`
+  </Card>
+  <Card title="OpenShift Token" icon="ticket">
+    `openshift_token`
+  </Card>
+  <Card title="Kubernetes Bearer Token" icon="shield">
+    `kubernetes_bearer_token`
+  </Card>
+</CardGroup>
+
+**Example: Creating a Kubernetes Bearer Token Credential**
+
+```bash
+curl -Lk --user 'admin:password' \
+     -X POST \
+     -d '{
+       "name": "Kubernetes Cluster",
+       "credential_type": 17,
+       "inputs": {
+         "host": "https://kubernetes.example.com:6443",
+         "bearer_token": "eyJhbGciOiJSUzI1NiIs...",
+         "verify_ssl": true
+       }
+     }' \
+     -H 'Content-Type: application/json' \
+     https://localhost:8043/api/v2/credentials/
+```
+
+### Create a Container Group
+
+Once a `Credential` has been associated with an `InstanceGroup`, the `InstanceGroup.kubernetes` property will return `True`.
+
+**Via API:**
+
+```bash
+curl -Lk --user 'admin:password' \
+     -X POST \
+     -d '{
+       "name": "Kubernetes Container Group",
+       "credential": 42,
+       "is_container_group": true
+     }' \
+     -H 'Content-Type: application/json' \
+     https://localhost:8043/api/v2/instance_groups/
+```
+
+<Note>
+Once created, you can associate the Container Group with Job Templates, Inventories, or Organizations just like regular Instance Groups.
+</Note>
+
+## Pod Customization
+
+### Default Pod Spec
+
+AWX provides a simple default pod specification in code. This includes:
+- Container image (execution environment)
+- Resource requests/limits
+- Volume mounts
+- Security context
+
+### Custom Pod Specifications
+
+A custom YAML document may be provided which will be **merged on top of** the default pod spec. This allows you to customize:
+
+<CardGroup cols={2}>
+  <Card title="Container Image" icon="box">
+    Specify custom execution environment image
+  </Card>
+  <Card title="Namespace" icon="folder">
+    Target specific Kubernetes namespace
+  </Card>
+  <Card title="Resources" icon="gauge">
+    Set CPU and memory limits
+  </Card>
+  <Card title="Node Selection" icon="server">
+    Use node selectors or affinity rules
+  </Card>
+  <Card title="Security Context" icon="shield">
+    Configure pod security settings
+  </Card>
+  <Card title="Volumes" icon="hard-drive">
+    Mount additional volumes
+  </Card>
+</CardGroup>
+
+### Example: Custom Pod Spec Override
+
+**Using Custom Image:**
+
+```bash
+cat > api_request.json <<EOF
+{
+  "pod_spec_override": "spec:\n  containers:\n    - image: my-custom-image"
+}
+EOF
+
+curl -Lk --user 'admin:password' \
+     -X PATCH \
+     -d @api_request.json \
+     -H 'Content-Type: application/json' \
+     https://localhost:8043/api/v2/instance_groups/2/
+```
+
+**Full Pod Customization Example:**
+
+```yaml
+spec:
+  serviceAccountName: awx-jobs
+  automountServiceAccountToken: true
+  containers:
+    - image: quay.io/ansible/awx-ee:latest
+      name: worker
+      args:
+        - ansible-runner
+        - worker
+        - '--private-data-dir=/runner'
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+      env:
+        - name: MY_CUSTOM_VAR
+          value: "custom_value"
+  nodeSelector:
+    node-role.kubernetes.io/worker: ""
+  tolerations:
+    - key: "dedicated"
+      operator: "Equal"
+      value: "awx"
+      effect: "NoSchedule"
+```
+
+<Warning>
+The pod spec override is merged with the default spec. Be careful not to override critical fields that AWX requires for job execution.
+</Warning>
+
+## Advanced Configuration
+
+### Namespace Configuration
+
+Specify the namespace where pods should be created:
+
+```yaml
+spec:
+  namespace: awx-jobs
+```
+
+<Note>
+Ensure the credential has permissions to create pods in the specified namespace.
+</Note>
+
+### Resource Limits
+
+Set appropriate resource requests and limits:
+
+```yaml
+spec:
+  containers:
+    - resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+```
+
+**Resource Guidelines:**
+- **Requests**: Minimum resources guaranteed to the pod
+- **Limits**: Maximum resources the pod can consume
+- Set requests lower than limits to allow bursting
+- Consider your playbook requirements and cluster capacity
+
+### Image Pull Secrets
+
+For private container registries:
+
+```yaml
+spec:
+  imagePullSecrets:
+    - name: private-registry-secret
+  containers:
+    - image: private-registry.example.com/awx-ee:latest
+```
+
+### Security Context
+
+Configure security settings:
+
+```yaml
+spec:
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  containers:
+    - securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+```
+
+### Node Selection and Affinity
+
+Target specific nodes:
+
+```yaml
+spec:
+  nodeSelector:
+    disktype: ssd
+    size: large
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/worker
+                operator: Exists
+```
+
+## Job Execution Flow
+
+<Steps>
+  <Step title="Job Submitted">
+    User launches a job targeting a Container Group
+  </Step>
+  <Step title="Pod Creation">
+    AWX creates a pod in the Kubernetes cluster using the custom spec
+  </Step>
+  <Step title="Job Execution">
+    Ansible playbook runs inside the container
+  </Step>
+  <Step title="Results Collection">
+    Job output is streamed back to AWX
+  </Step>
+  <Step title="Pod Deletion">
+    Pod is automatically deleted after job completion
+  </Step>
+</Steps>
+
+## Always-On Instances
+
+For persistent execution capacity, manually create instances through the AWX API or UI:
+
+```bash
+curl -Lk --user 'admin:password' \
+     -X POST \
+     -d '{
+       "hostname": "persistent-worker-01",
+       "node_type": "execution",
+       "node_state": "installed"
+     }' \
+     -H 'Content-Type: application/json' \
+     https://localhost:8043/api/v2/instances/
+```
+
+## Kubernetes API Reference
+
+For a full list of customizable pod options, refer to the Kubernetes documentation:
+
+[Pod v1 API Reference](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/pod-v1/)
+
+## Troubleshooting
+
+### Pods Not Starting
+
+<Steps>
+  <Step title="Check Credentials">
+    Verify the Container Group credential can authenticate to the cluster
+  </Step>
+  <Step title="Verify RBAC">
+    Ensure the service account has permissions to create pods
+  </Step>
+  <Step title="Review Pod Logs">
+    Check Kubernetes events and pod logs for errors
+  </Step>
+  <Step title="Validate Pod Spec">
+    Ensure custom pod spec override is valid YAML and doesn't conflict with defaults
+  </Step>
+</Steps>
+
+### Jobs Failing in Containers
+
+<Warning>
+Common issues:
+- Insufficient resources (CPU/memory limits too low)
+- Missing image pull secrets for private registries
+- Network connectivity issues from pods
+- Volume mount permissions
+</Warning>
+
+### Performance Issues
+
+**Optimize Container Group Performance:**
+- Use local container image caches
+- Set appropriate resource requests/limits
+- Consider node affinity to reduce pod scheduling time
+- Use persistent volumes for shared data
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Resource Planning" icon="chart-line">
+    Size resource requests based on typical playbook requirements
+  </Card>
+  <Card title="Image Optimization" icon="image">
+    Use optimized execution environment images to reduce startup time
+  </Card>
+  <Card title="Namespace Isolation" icon="layer-group">
+    Use separate namespaces for different teams or environments
+  </Card>
+  <Card title="Monitor Capacity" icon="gauge-high">
+    Watch cluster capacity and scale nodes as needed
+  </Card>
+</CardGroup>
+
+## Benefits of Container Groups
+
+- **Isolation**: Each job runs in a fresh, clean environment
+- **Scalability**: Dynamically scale job capacity with cluster resources
+- **Flexibility**: Use different execution environments per job
+- **Resource Efficiency**: Only consume resources during job execution
+- **Security**: Leverage Kubernetes security features and isolation

@@ -1,0 +1,562 @@
+---
+title: Cloud Provider Integration
+description: Configure dynamic inventory from AWS, Azure, GCP, and other cloud platforms
+---
+
+AWX supports dynamic inventory integration with major cloud providers, allowing automatic discovery and synchronization of hosts from cloud infrastructure. This eliminates manual inventory management and ensures inventory remains current.
+
+## Supported Cloud Providers
+
+AWX integrates with the following cloud platforms:
+
+- Amazon EC2 (AWS)
+- Google Compute Engine (GCP)
+- Microsoft Azure Resource Manager
+- VMware vCenter
+- VMware ESXi
+- Red Hat Virtualization (RHV)
+- OpenStack
+- Red Hat Satellite 6
+- Red Hat Ansible Automation Platform (Controller)
+- Red Hat Insights
+- OpenShift Virtualization
+- Terraform State
+
+## Amazon Web Services (AWS)
+
+### AWS Credential Configuration
+
+Create an AWS credential with your access credentials:
+
+```yaml
+Credential Type: Amazon Web Services
+Fields:
+  Access Key: AKIAIOSFODNN7EXAMPLE
+  Secret Key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+  # Optional:
+  STS Token: <temporary session token>
+```
+
+### AWS EC2 Inventory Source
+
+Create a dynamic inventory source:
+
+```yaml
+Inventory Source:
+  Name: AWS Production Inventory
+  Source: Amazon EC2
+  Credential: <AWS Credential>
+  Regions: us-east-1, us-west-2
+  Instance Filters: tag:Environment=production
+  Update on Launch: Yes
+  Overwrite: Yes
+  Overwrite Variables: No
+```
+
+### Custom EC2 Inventory Plugin
+
+For advanced configuration, create an SCM inventory with a custom plugin configuration:
+
+```yaml
+# inventory/aws_ec2.yml
+plugin: amazon.aws.aws_ec2
+regions:
+  - us-east-1
+  - us-west-2
+filters:
+  instance-state-name: running
+  tag:Environment: production
+keyed_groups:
+  - key: tags.Application
+    prefix: app
+  - key: placement.region
+    prefix: region
+compose:
+  ansible_host: public_ip_address
+```
+
+### AWS Regions
+
+Supported AWS regions include:
+- us-east-1, us-east-2, us-west-1, us-west-2
+- eu-west-1, eu-west-2, eu-west-3, eu-central-1
+- ap-northeast-1, ap-northeast-2, ap-southeast-1, ap-southeast-2
+- ca-central-1, sa-east-1
+- And all other AWS regions
+
+## Microsoft Azure
+
+### Azure Credential Configuration
+
+```yaml
+Credential Type: Microsoft Azure Resource Manager
+Fields:
+  Subscription ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  Client ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  Client Secret: <your-client-secret>
+  Tenant ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  # Optional:
+  Cloud Environment: AzureCloud (or AzureUSGovernment, AzureChinaCloud)
+```
+
+### Creating Azure Service Principal
+
+```bash
+# Create service principal
+az ad sp create-for-rbac --name "AWX-ServicePrincipal" \
+  --role="Reader" \
+  --scopes="/subscriptions/{subscription-id}"
+
+# Output:
+# {
+#   "appId": "<client-id>",
+#   "password": "<client-secret>",
+#   "tenant": "<tenant-id>"
+# }
+```
+
+### Azure Inventory Source
+
+```yaml
+Inventory Source:
+  Name: Azure Production VMs
+  Source: Microsoft Azure Resource Manager
+  Credential: <Azure Credential>
+  Update on Launch: Yes
+```
+
+### Custom Azure Inventory Plugin
+
+```yaml
+# inventory/azure_rm.yml
+plugin: azure.azcollection.azure_rm
+include_vm_resource_groups:
+  - production-rg
+  - staging-rg
+auth_source: auto
+keyed_groups:
+  - prefix: tag
+    key: tags
+conditional_groups:
+  linux: "'Linux' in os_profile.system"
+  windows: "'Windows' in os_profile.system"
+```
+
+## Google Cloud Platform (GCP)
+
+### GCE Credential Configuration
+
+```yaml
+Credential Type: Google Compute Engine
+Fields:
+  Service Account Email: awx@project-id.iam.gserviceaccount.com
+  Service Account JSON File: |
+    {
+      "type": "service_account",
+      "project_id": "your-project-id",
+      "private_key_id": "key-id",
+      "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+      "client_email": "awx@project-id.iam.gserviceaccount.com",
+      "client_id": "123456789",
+      "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+      "token_uri": "https://oauth2.googleapis.com/token"
+    }
+  Project: your-project-id
+```
+
+### GCE Inventory Source
+
+```yaml
+Inventory Source:
+  Name: GCP Instances
+  Source: Google Compute Engine
+  Credential: <GCE Credential>
+  Regions: us-central1, us-east1
+  Update on Launch: Yes
+```
+
+### Custom GCP Inventory Plugin
+
+```yaml
+# inventory/gcp_compute.yml
+plugin: google.cloud.gcp_compute
+projects:
+  - my-gcp-project
+auth_kind: serviceaccount
+service_account_file: /path/to/credentials.json
+zones:
+  - us-central1-a
+  - us-central1-b
+filters:
+  - status = RUNNING
+  - labels.environment = production
+keyed_groups:
+  - key: labels.app
+    prefix: app
+  - key: zone
+    prefix: zone
+```
+
+## VMware vCenter
+
+### VMware Credential Configuration
+
+```yaml
+Credential Type: VMware vCenter
+Fields:
+  vCenter Host: vcenter.example.com
+  Username: administrator@vsphere.local
+  Password: <vcenter-password>
+```
+
+### VMware Inventory Source
+
+```yaml
+Inventory Source:
+  Name: VMware VMs
+  Source: VMware vCenter
+  Credential: <VMware Credential>
+  Update on Launch: Yes
+```
+
+### VMware Inventory Variables
+
+Configure additional source variables:
+
+```yaml
+validate_certs: false  # For self-signed certificates
+with_tags: true
+with_nested_properties: true
+```
+
+### Custom VMware Inventory Plugin
+
+```yaml
+# inventory/vmware.yml
+plugin: community.vmware.vmware_vm_inventory
+hostname: vcenter.example.com
+username: administrator@vsphere.local
+password: "{{ lookup('env', 'VMWARE_PASSWORD') }}"
+validate_certs: false
+with_tags: true
+properties:
+  - name
+  - config.guestId
+  - guest.ipAddress
+  - summary.runtime.powerState
+keyed_groups:
+  - key: config.guestId
+    prefix: os
+  - key: summary.runtime.powerState
+    prefix: state
+compose:
+  ansible_host: guest.ipAddress
+```
+
+## Red Hat Virtualization (RHV)
+
+### RHV Credential Configuration
+
+```yaml
+Credential Type: Red Hat Virtualization
+Fields:
+  Host: https://rhv-manager.example.com/ovirt-engine/api
+  Username: admin@internal
+  Password: <rhv-password>
+  CA File: |
+    -----BEGIN CERTIFICATE-----
+    ...
+    -----END CERTIFICATE-----
+```
+
+### RHV Inventory Source
+
+```yaml
+Inventory Source:
+  Name: RHV Virtual Machines
+  Source: Red Hat Virtualization
+  Credential: <RHV Credential>
+  Update on Launch: Yes
+```
+
+## OpenStack
+
+### OpenStack Credential Configuration
+
+```yaml
+Credential Type: OpenStack
+Fields:
+  Authentication URL: https://openstack.example.com:5000/v3
+  Username: admin
+  Password: <openstack-password>
+  Project Name: admin
+  Domain Name: Default
+  # Optional:
+  Project Domain Name: Default
+  User Domain Name: Default
+```
+
+### OpenStack Inventory Source
+
+```yaml
+Inventory Source:
+  Name: OpenStack Instances
+  Source: OpenStack
+  Credential: <OpenStack Credential>
+  Update on Launch: Yes
+```
+
+## Red Hat Satellite 6
+
+### Satellite 6 Credential Configuration
+
+```yaml
+Credential Type: Red Hat Satellite 6
+Fields:
+  Satellite 6 URL: https://satellite.example.com
+  Username: admin
+  Password: <satellite-password>
+```
+
+### Satellite 6 Inventory Source
+
+```yaml
+Inventory Source:
+  Name: Satellite Managed Hosts
+  Source: Red Hat Satellite 6
+  Credential: <Satellite Credential>
+  Update on Launch: Yes
+```
+
+## Terraform State
+
+### Terraform Backend Credential
+
+For Terraform state integration, create credentials based on your backend:
+
+```yaml
+# For S3 backend
+Credential Type: Amazon Web Services
+Fields:
+  Access Key: <aws-access-key>
+  Secret Key: <aws-secret-key>
+
+# For Azure backend
+Credential Type: Microsoft Azure Resource Manager
+# ... Azure credentials ...
+```
+
+### Terraform Inventory Source
+
+```yaml
+Inventory Source:
+  Name: Terraform Infrastructure
+  Source: Terraform State
+  Credential: <Backend Credential>
+  Backend Type: s3
+  Backend Config:
+    bucket: my-terraform-state
+    key: production/terraform.tfstate
+    region: us-east-1
+```
+
+## OpenShift Virtualization
+
+### OpenShift Credential Configuration
+
+```yaml
+Credential Type: OpenShift or Kubernetes API Bearer Token
+Fields:
+  OpenShift or Kubernetes API Endpoint: https://api.openshift.example.com:6443
+  API Authentication Bearer Token: <your-token>
+  Verify SSL: Yes
+  Certificate Authority Data: |
+    -----BEGIN CERTIFICATE-----
+    ...
+    -----END CERTIFICATE-----
+```
+
+### OpenShift Virtualization Inventory
+
+```yaml
+Inventory Source:
+  Name: OpenShift VMs
+  Source: OpenShift Virtualization
+  Credential: <OpenShift Credential>
+  Update on Launch: Yes
+```
+
+## Inventory Update Configuration
+
+### Update Options
+
+```yaml
+Inventory Source Options:
+  Update on Launch: Yes         # Update before job runs
+  Update on Project Update: No  # Update when source project updates
+  Overwrite: Yes                # Replace existing hosts
+  Overwrite Variables: No       # Keep existing host variables
+  Update Cache Timeout: 0       # Seconds to cache (0 = always update)
+  Verbosity: 1                  # 0=Warning, 1=Info, 2=Debug
+```
+
+### Scheduling Updates
+
+Create scheduled inventory updates:
+
+```bash
+curl -X POST https://awx.example.org/api/v2/inventory_sources/1/schedules/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Daily Update",
+    "rrule": "DTSTART:20260101T060000Z RRULE:FREQ=DAILY;INTERVAL=1",
+    "enabled": true
+  }'
+```
+
+## Host Variables and Grouping
+
+### Automatic Host Variables
+
+Cloud inventory sources automatically populate host variables:
+
+```yaml
+# AWS Example
+ansible_host: 54.123.45.67
+ec2_ami_id: ami-0abcdef1234567890
+ec2_instance_type: t3.medium
+ec2_region: us-east-1
+ec2_vpc_id: vpc-12345678
+
+# Azure Example
+ansible_host: 40.123.45.67
+azure_vm_size: Standard_D2s_v3
+azure_location: eastus
+azure_resource_group: production-rg
+
+# GCP Example
+ansible_host: 35.123.45.67
+gce_machine_type: n1-standard-2
+gce_zone: us-central1-a
+gce_project: my-project
+```
+
+### Dynamic Grouping
+
+Hosts are automatically grouped by various attributes:
+
+```yaml
+# AWS groups
+tag_Environment_production
+tag_Application_web
+region_us_east_1
+instance_type_t3_medium
+
+# Azure groups
+tag_environment_production
+location_eastus
+resource_group_production_rg
+
+# GCP groups
+zone_us_central1_a
+machine_type_n1_standard_2
+network_default
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**Authentication Failures:**
+- Verify credentials are valid and not expired
+- Check service account/principal has required permissions
+- Ensure API endpoints are accessible from AWX
+
+**No Hosts Discovered:**
+- Verify filter expressions are correct
+- Check that instances are running
+- Ensure credential has read access to resources
+- Review inventory update job output
+
+**SSL Certificate Errors:**
+- Add CA certificates to credential configuration
+- Consider disabling SSL verification for testing (not recommended for production)
+
+**Performance Issues:**
+- Limit regions/zones to only what's needed
+- Use instance filters to reduce query scope
+- Increase cache timeout for large inventories
+
+### Debug Inventory Updates
+
+```bash
+# View inventory source details
+curl https://awx.example.org/api/v2/inventory_sources/1/ \
+  -H "Authorization: Bearer <token>"
+
+# Get latest update job
+curl https://awx.example.org/api/v2/inventory_sources/1/inventory_updates/ \
+  -H "Authorization: Bearer <token>"
+
+# View update output
+curl https://awx.example.org/api/v2/inventory_updates/123/stdout/ \
+  -H "Authorization: Bearer <token>"
+```
+
+## Best Practices
+
+### Security
+
+- Use IAM roles/managed identities when running in cloud
+- Apply least privilege to service accounts
+- Rotate credentials regularly
+- Store credentials in external secret managers when possible
+- Enable SSL/TLS verification
+
+### Performance
+
+- Use specific regions/zones instead of "all"
+- Apply instance filters to limit scope
+- Schedule updates during off-peak hours
+- Increase cache timeout for stable environments
+- Use "Update on Launch" sparingly for large inventories
+
+### Organization
+
+- Create separate inventory sources per environment
+- Use consistent tagging strategies across clouds
+- Document filter expressions and grouping logic
+- Test inventory updates before applying to production
+
+## API Examples
+
+### Create AWS Inventory Source
+
+```bash
+curl -X POST https://awx.example.org/api/v2/inventory_sources/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "AWS Production",
+    "inventory": 1,
+    "source": "ec2",
+    "credential": 5,
+    "source_vars": "regions: us-east-1\ninstance_filters: tag:Environment=production",
+    "update_on_launch": true,
+    "overwrite": true
+  }'
+```
+
+### Trigger Manual Update
+
+```bash
+curl -X POST https://awx.example.org/api/v2/inventory_sources/1/update/ \
+  -H "Authorization: Bearer <token>"
+```
+
+## See Also
+
+- [Inventory Plugins Documentation](/docs/inventory/inventory_plugins.md)
+- [Credential Types Reference](/awx/main/models/credential.py:429)
+- [Inventory Source Options](/awx/main/models/inventory.py:19)

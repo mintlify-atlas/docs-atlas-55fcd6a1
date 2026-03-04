@@ -1,0 +1,389 @@
+---
+title: Building AWX
+description: Build AWX images and artifacts for development and production
+---
+
+This guide covers building AWX images, API documentation, and understanding the build system.
+
+## Building Images
+
+### Development Image
+
+The development image includes all dependencies needed for AWX development:
+
+```bash
+make docker-compose-build
+```
+
+This builds the `ansible/awx_devel` image based on the Dockerfile template at `tools/ansible/roles/dockerfile/templates/Dockerfile.j2`.
+
+#### Build Options
+
+**Custom image name and tag:**
+```bash
+export DEVEL_IMAGE_NAME=quay.io/myuser/awx_devel:custom-tag
+make docker-compose-build
+```
+
+**Custom receptor image:**
+```bash
+export RECEPTOR_IMAGE=quay.io/ansible/receptor:release_1.1
+make docker-compose-build
+```
+
+**Docker cache control:**
+```bash
+# Disable cache
+DOCKER_CACHE=--no-cache make docker-compose-build
+```
+
+### Production Image
+
+To build a production-ready AWX image:
+
+```bash
+make awx-image
+```
+
+The production image is optimized for deployment and does not include development tools.
+
+### Multi-platform Builds
+
+AWX supports building for multiple platforms:
+
+```bash
+# Default platforms: linux/amd64, linux/arm64
+make docker-compose-build
+
+# Custom platforms
+PLATFORMS=linux/amd64,linux/arm64,linux/ppc64le make docker-compose-build
+```
+
+## Building API Documentation
+
+AWX includes support for building Swagger/OpenAPI documentation.
+
+### Generate API Documentation
+
+From inside the development container:
+
+```bash
+(container)/awx_devel$ make swagger
+```
+
+This will write a file named `swagger.json` that contains the API specification in OpenAPI format.
+
+### View the Documentation
+
+A variety of online tools are available for translating the OpenAPI specification into more consumable formats:
+
+- **Swagger Editor**: http://editor.swagger.io
+- **Swagger UI**: https://petstore.swagger.io/
+- **ReDoc**: https://redocly.github.io/redoc/
+
+Simply upload or paste the `swagger.json` content into these tools.
+
+## Build System Overview
+
+### Makefile Targets
+
+AWX uses a comprehensive Makefile with numerous targets. Here are the key ones:
+
+#### Development
+
+```bash
+# Build development image
+make docker-compose-build
+
+# Start development environment
+make docker-compose
+
+# Start without launching services
+make docker-compose-test
+
+# Clean up containers and images
+make docker-clean
+```
+
+#### Testing
+
+```bash
+# Run Python unit tests
+make test
+
+# Run with coverage
+make test COVERAGE_ARGS="--cov --cov-report=xml"
+
+# Run specific test directories
+make test TEST_DIRS="awx/main/tests/unit"
+
+# Run tests in parallel
+make test PARALLEL_TESTS="-n auto"
+
+# Run Python code formatter
+make black
+```
+
+#### UI Build
+
+```bash
+# Clean and build UI
+make clean-ui ui
+
+# Use local ansible-ui repository
+UI_LOCAL=/path/to/ansible-ui make ui
+```
+
+#### Collection
+
+```bash
+# Install AWX collection
+make install_collection
+
+# Build collection
+make build_collection
+
+# Run collection tests
+make test_collection
+```
+
+### Build Variables
+
+Key environment variables that control the build:
+
+```bash
+# Python interpreter
+PYTHON=python3.12
+
+# Docker compose command
+DOCKER_COMPOSE="docker compose"
+
+# Branch/tag for images
+COMPOSE_TAG=$(git rev-parse --abbrev-ref HEAD)
+
+# Node type for development
+MAIN_NODE_TYPE=hybrid  # or control
+
+# Enable additional services
+SPLUNK=false
+PROMETHEUS=false
+GRAFANA=false
+VAULT=false
+OTEL=false
+
+# Package installation
+SRC_ONLY_PKGS="cffi,pycparser,psycopg,twilio"
+VENV_BOOTSTRAP="pip==25.3 setuptools==80.9.0"
+```
+
+## Python Package Building
+
+### Source Distribution
+
+Build a source distribution (sdist) of AWX:
+
+```bash
+# Generate sdist
+make sdist
+
+# Output: dist/awx-<version>.tar.gz
+```
+
+### Virtual Environment Setup
+
+AWX requires specific packages to be installed from source:
+
+```bash
+# Packages installed only from source (not binary wheels)
+SRC_ONLY_PKGS=cffi,pycparser,psycopg,twilio
+
+# Bootstrap packages upgraded before requirements
+VENV_BOOTSTRAP="pip==25.3 setuptools==80.9.0 setuptools_scm[toml]==9.2.2"
+```
+
+## Requirements Management
+
+AWX uses pip-tools to manage Python dependencies.
+
+### Requirements Files
+
+Located in the `requirements/` directory:
+
+- `requirements.in` - Base runtime requirements
+- `requirements_dev.in` - Development requirements
+- `requirements_git.txt` - Git-based dependencies
+
+### Update Requirements
+
+To update pinned requirements:
+
+```bash
+# Update all requirements
+make requirements
+
+# Compile requirements from .in files
+pip-compile requirements/requirements.in
+```
+
+## Building for Deployment
+
+### Kubernetes Image
+
+For Kubernetes/OpenShift deployments:
+
+```bash
+make awx-kube-dev
+```
+
+This builds an image suitable for deployment with the AWX Operator.
+
+### Custom Build Arguments
+
+You can pass custom build arguments:
+
+```bash
+# Example: Custom base image
+docker build \
+  --build-arg BASE_IMAGE=registry.redhat.io/ubi8/ubi:latest \
+  -t myawx:latest \
+  -f tools/ansible/roles/dockerfile/templates/Dockerfile.j2 \
+  .
+```
+
+## Build Artifacts
+
+### Generated Files
+
+The build process generates several artifacts:
+
+```bash
+# Swagger documentation
+swagger.json
+
+# Source distribution
+dist/awx-<version>.tar.gz
+
+# UI build output
+awx/ui/build/
+
+# Collection build
+~/.ansible/collections/ansible_collections/awx/awx/
+```
+
+### Clean Build Artifacts
+
+```bash
+# Clean Python build artifacts
+make clean
+
+# Clean UI artifacts
+make clean-ui
+
+# Clean everything including Docker
+make docker-clean
+```
+
+## Dependency Management
+
+### Editable Dependencies
+
+For development, you can install editable dependencies:
+
+```bash
+EDITABLE_DEPENDENCIES=true make docker-compose
+```
+
+This installs Python packages in editable mode, allowing you to modify them during development.
+
+### Receptor Integration
+
+AWX integrates with Receptor for mesh networking:
+
+```bash
+# Default receptor image
+RECEPTOR_IMAGE=quay.io/ansible/receptor:devel
+
+# Use custom receptor
+export RECEPTOR_IMAGE=quay.io/ansible/receptor:custom
+make docker-compose-build
+```
+
+## Troubleshooting Builds
+
+### Common Build Issues
+
+**Docker build fails:**
+```bash
+# Clear Docker cache
+DOCKER_CACHE=--no-cache make docker-compose-build
+
+# Check Docker resources (memory, disk space)
+docker system df
+```
+
+**Python dependency conflicts:**
+```bash
+# Regenerate requirements
+make requirements
+
+# Clean pip cache
+pip cache purge
+```
+
+**UI build fails:**
+```bash
+# Ensure Node.js and npm are correct versions
+node --version  # Should match requirements
+npm --version
+
+# Clean and rebuild
+make clean-ui ui
+```
+
+### Build Logs
+
+To capture detailed build logs:
+
+```bash
+# Verbose Docker build
+make docker-compose-build 2>&1 | tee build.log
+
+# Check container logs
+docker logs tools_awx_1
+```
+
+## CI/CD Integration
+
+AWX uses GitHub Actions for continuous integration. The workflow files are located in `.github/workflows/`.
+
+### Running CI Locally
+
+You can run similar checks locally:
+
+```bash
+# Run linters
+make black
+
+# Run tests with coverage
+make test COVERAGE_ARGS="--cov --cov-report=xml --junitxml=reports/junit.xml"
+
+# Run collection tests
+make test_collection
+```
+
+## Version Management
+
+AWX version is managed through `tools/scripts/scm_version.py`:
+
+```bash
+# Get current version
+python tools/scripts/scm_version.py
+
+# Version is based on git tags and commit history
+```
+
+## Next Steps
+
+- [Testing AWX](/development/testing)
+- [Architecture Overview](/development/architecture-overview)
+- [Contributing Guidelines](/development/contributing)

@@ -1,0 +1,401 @@
+---
+title: 'Workflow Job Templates'
+description: 'Manage AWX workflow job templates via the API'
+---
+
+## Overview
+
+Workflow job templates chain multiple job templates, projects updates, and inventory updates together with conditional logic. They enable complex automation workflows with success/failure/always branching.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/workflow_job_templates/` | List workflow templates |
+| POST | `/api/v2/workflow_job_templates/` | Create workflow template |
+| GET | `/api/v2/workflow_job_templates/{id}/` | Retrieve workflow template |
+| PATCH | `/api/v2/workflow_job_templates/{id}/` | Update workflow template |
+| DELETE | `/api/v2/workflow_job_templates/{id}/` | Delete workflow template |
+| POST | `/api/v2/workflow_job_templates/{id}/launch/` | Launch workflow |
+| POST | `/api/v2/workflow_job_templates/{id}/copy/` | Copy workflow template |
+
+## List Workflow Templates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Create Workflow Template
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Deploy Full Stack",
+    "description": "Deploy database, backend, and frontend",
+    "organization": 1,
+    "extra_vars": "---\nenv: production",
+    "allow_simultaneous": false,
+    "survey_enabled": false,
+    "ask_variables_on_launch": true,
+    "ask_inventory_on_launch": false,
+    "ask_limit_on_launch": false,
+    "ask_labels_on_launch": false
+  }'
+```
+
+<ParamField body="name" type="string" required>
+  Workflow template name
+</ParamField>
+
+<ParamField body="description" type="string">
+  Workflow description
+</ParamField>
+
+<ParamField body="organization" type="integer" required>
+  Organization ID
+</ParamField>
+
+<ParamField body="extra_vars" type="string">
+  Workflow-level extra variables
+</ParamField>
+
+<ParamField body="allow_simultaneous" type="boolean" default="false">
+  Allow multiple instances to run simultaneously
+</ParamField>
+
+<ParamField body="survey_enabled" type="boolean" default="false">
+  Enable survey
+</ParamField>
+
+<ParamField body="ask_variables_on_launch" type="boolean">
+  Prompt for variables at launch
+</ParamField>
+
+<ParamField body="ask_inventory_on_launch" type="boolean">
+  Prompt for inventory at launch
+</ParamField>
+
+<ParamField body="ask_limit_on_launch" type="boolean">
+  Prompt for limit at launch
+</ParamField>
+
+<ParamField body="ask_labels_on_launch" type="boolean">
+  Prompt for labels at launch
+</ParamField>
+
+<ParamField body="webhook_service" type="string">
+  Enable webhook: `github` or `gitlab`
+</ParamField>
+
+<ParamField body="webhook_credential" type="integer">
+  Webhook credential ID
+</ParamField>
+
+## Retrieve Workflow Template
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ResponseField name="related" type="object">
+  Links to related resources:
+  - `organization` - Parent organization
+  - `workflow_jobs` - Execution history
+  - `workflow_nodes` - Workflow node definitions
+  - `schedules` - Execution schedules
+  - `launch` - Launch endpoint
+  - `webhook_key` - Webhook configuration
+  - `webhook_receiver` - Webhook URL
+  - `activity_stream` - Activity log
+  - `notification_templates_*` - Notification templates
+  - `survey_spec` - Survey specification
+  - `access_list` - Access list
+  - `object_roles` - Available roles
+  - `labels` - Associated labels
+  - `copy` - Copy endpoint
+</ResponseField>
+
+## Workflow Nodes
+
+### List Workflow Nodes
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/workflow_nodes/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Create Workflow Node
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_templates/5/workflow_nodes/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "unified_job_template": 10,
+    "identifier": "deploy_db"
+  }'
+```
+
+<ParamField body="unified_job_template" type="integer" required>
+  ID of job template, project, or inventory source
+</ParamField>
+
+<ParamField body="identifier" type="string" required>
+  Unique identifier for the node
+</ParamField>
+
+<ParamField body="extra_data" type="object">
+  Node-level extra vars (overrides template vars)
+</ParamField>
+
+<ParamField body="inventory" type="integer">
+  Node-level inventory override
+</ParamField>
+
+<ParamField body="limit" type="string">
+  Node-level limit
+</ParamField>
+
+<ParamField body="job_type" type="string">
+  Job type override: `run` or `check`
+</ParamField>
+
+<ParamField body="all_parents_must_converge" type="boolean" default="false">
+  Whether all parent nodes must complete before this node runs
+</ParamField>
+
+### Associate Node Relationships
+
+Create success/failure/always relationships:
+
+```bash
+# Success relationship
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_template_nodes/100/success_nodes/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 101
+  }'
+
+# Failure relationship
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_template_nodes/100/failure_nodes/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 102
+  }'
+
+# Always relationship  
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_template_nodes/100/always_nodes/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 103
+  }'
+```
+
+## Launch Workflow
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_templates/5/launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "extra_vars": "deploy_version: v2.0",
+    "limit": "production"
+  }'
+```
+
+Returns a workflow_job object.
+
+## Survey Specification
+
+```bash
+# Get survey
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/survey_spec/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Create/update survey
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_templates/5/survey_spec/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Deployment Survey",
+    "description": "Parameters for deployment",
+    "spec": [
+      {
+        "question_name": "Environment",
+        "required": true,
+        "type": "multiplechoice",
+        "variable": "environment",
+        "choices": ["dev", "staging", "production"]
+      }
+    ]
+  }'
+```
+
+## Workflow Jobs
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/workflow_jobs/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Schedules
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/schedules/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Labels
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/labels/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Notifications
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/notification_templates_started/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/notification_templates_success/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/notification_templates_error/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/notification_templates_approvals/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Object Roles
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_job_templates/5/object_roles/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Available roles:
+- **admin_role** - Full workflow administration
+- **execute_role** - Launch workflows
+- **read_role** - View workflow details
+
+## Copy Workflow
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_templates/5/copy/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Deploy Full Stack Copy"
+  }'
+```
+
+## Complete Example
+
+```python
+import requests
+import json
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Create workflow template
+workflow_data = {
+    "name": "Full Stack Deploy",
+    "description": "Deploy all components",
+    "organization": 1
+}
+
+response = requests.post(
+    f"{base_url}/workflow_job_templates/",
+    headers=headers,
+    data=json.dumps(workflow_data)
+)
+
+workflow = response.json()
+workflow_id = workflow['id']
+
+# Create nodes
+nodes = [
+    {"unified_job_template": 10, "identifier": "deploy_db"},
+    {"unified_job_template": 11, "identifier": "deploy_backend"},
+    {"unified_job_template": 12, "identifier": "deploy_frontend"},
+    {"unified_job_template": 13, "identifier": "rollback"}
+]
+
+node_ids = {}
+for node_data in nodes:
+    node_response = requests.post(
+        f"{base_url}/workflow_job_templates/{workflow_id}/workflow_nodes/",
+        headers=headers,
+        data=json.dumps(node_data)
+    )
+    node = node_response.json()
+    node_ids[node['identifier']] = node['id']
+
+# Create relationships
+# DB -> Backend (on success)
+requests.post(
+    f"{base_url}/workflow_job_template_nodes/{node_ids['deploy_db']}/success_nodes/",
+    headers=headers,
+    data=json.dumps({"id": node_ids['deploy_backend']})
+)
+
+# Backend -> Frontend (on success)
+requests.post(
+    f"{base_url}/workflow_job_template_nodes/{node_ids['deploy_backend']}/success_nodes/",
+    headers=headers,
+    data=json.dumps({"id": node_ids['deploy_frontend']})
+)
+
+# Any failure -> Rollback
+for node_name in ['deploy_db', 'deploy_backend', 'deploy_frontend']:
+    requests.post(
+        f"{base_url}/workflow_job_template_nodes/{node_ids[node_name]}/failure_nodes/",
+        headers=headers,
+        data=json.dumps({"id": node_ids['rollback']})
+    )
+
+print(f"Workflow created: {workflow_id}")
+
+# Launch workflow
+launch_response = requests.post(
+    f"{base_url}/workflow_job_templates/{workflow_id}/launch/",
+    headers=headers
+)
+
+workflow_job = launch_response.json()
+print(f"Launched workflow job: {workflow_job['id']}")
+```

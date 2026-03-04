@@ -1,0 +1,460 @@
+---
+title: Capacity Planning
+description: Configure and optimize AWX instance capacity for job execution
+---
+
+## Overview
+
+The AWX capacity system determines how many jobs can run on an instance based on available memory and CPU resources. Capacity management ensures efficient resource utilization while preventing system overload.
+
+## Capacity Fundamentals
+
+Capacity is calculated based on:
+
+- **Memory capacity (`mem_capacity`)**: Available system memory
+- **CPU capacity (`cpu_capacity`)**: Available CPU cores
+- **Forks**: Number of simultaneous connections Ansible maintains
+
+### How Capacity Works
+
+1. Each instance has a calculated capacity based on hardware resources
+2. Jobs consume capacity based on their "impact" (primarily fork count)
+3. The task manager assigns jobs to instances with sufficient capacity
+4. When capacity is exhausted, jobs wait until resources free up
+
+<Note>
+Capacity is **not** a zero-sum system. If only one instance is available, AWX allows jobs to run even if they exceed capacity, ensuring jobs don't become permanently blocked.
+</Note>
+
+## Capacity Algorithms
+
+### Memory-Relative Capacity (Default)
+
+Calculates capacity based on available memory, allowing CPU overcommit:
+
+```
+capacity = (total_memory_mb - 2048) / mem_per_fork
+```
+
+**Example**: 4GB system
+```
+(4096 - 2048) / 100 = ~20 forks
+```
+
+**Key Points**:
+- Reserves 2GB for AWX services
+- Default: 100MB per fork (`SYSTEM_TASK_FORKS_MEM`)
+- Best for I/O-bound workloads
+- Protects against out-of-memory conditions
+
+**Configuration**:
+```python
+# /etc/tower/conf.d/capacity.py
+SYSTEM_TASK_FORKS_MEM = 100  # MB per fork
+```
+
+### CPU-Relative Capacity
+
+Calculates capacity based on CPU cores:
+
+```
+capacity = cpu_cores * forks_per_cpu
+```
+
+**Example**: 4-core system
+```
+4 * 4 = 16 forks
+```
+
+**Key Points**:
+- Default: 4 forks per core (`SYSTEM_TASK_FORKS_CPU`)
+- Best for CPU-bound workloads
+- Reduces contention for compute resources
+
+**Configuration**:
+```python
+# /etc/tower/conf.d/capacity.py
+SYSTEM_TASK_FORKS_CPU = 4  # Forks per CPU core
+```
+
+### Capacity Adjustment
+
+Balance between memory and CPU capacity using `capacity_adjustment`:
+
+```
+final_capacity = min_capacity + (max_capacity - min_capacity) * capacity_adjustment
+```
+
+**Values**:
+- `0.0`: Use minimum (most conservative)
+- `0.5`: 50/50 balance
+- `1.0`: Use maximum (most aggressive)
+
+**Example**: CPU=16, Memory=20, adjustment=0.5
+```
+16 + (20 - 16) * 0.5 = 18 forks
+```
+
+**Set via API**:
+```bash
+curl -X PATCH https://awx.example.org/api/v2/instances/1/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"capacity_adjustment": 0.5}'
+```
+
+## Job Impact
+
+### Job Types and Impact
+
+Jobs have two impact types:
+
+#### Control Impact
+**Fixed**: `AWX_CONTROL_NODE_TASK_IMPACT` (default: 1)  
+**Applied to**: The instance controlling the job
+
+#### Execution Impact
+**Variable**: Based on job type
+
+| Job Type | Execution Impact | Formula |
+|----------|------------------|----------|
+| Job Templates | `forks + 1` | `min(forks, host_count) + 1` |
+| Ad-hoc Commands | `forks + 1` | `min(forks, host_count) + 1` |
+| Project Updates | `1` | Fixed |
+| Inventory Updates | `1` | Fixed |
+| System Jobs | `5` | Fixed |
+
+<Note>
+The `+1` accounts for the Ansible parent process that coordinates execution.
+</Note>
+
+### Impact Examples
+
+#### Example 1: Hybrid Node (Control + Execution)
+Settings: `AWX_CONTROL_NODE_TASK_IMPACT=1`, forks=5, hosts=3
+
+```
+Total Impact = Control Impact + Execution Impact
+             = 1 + (min(5, 3) + 1)
+             = 1 + 4
+             = 5
+```
+
+#### Example 2: Container Group Job
+Settings: `AWX_CONTROL_NODE_TASK_IMPACT=1`
+
+```
+Controller Node Impact = 1 (control only)
+Execution Node Impact = 0 (external to cluster)
+```
+
+#### Example 3: Project Update
+Settings: `AWX_CONTROL_NODE_TASK_IMPACT=1`
+
+```
+Total Impact = Control Impact + Execution Impact
+             = 1 + 1
+             = 2
+```
+
+## Control Node Task Impact
+
+The `AWX_CONTROL_NODE_TASK_IMPACT` setting controls how much capacity controlling jobs consumes.
+
+### When to Adjust
+
+**Increase** (`AWX_CONTROL_NODE_TASK_IMPACT = 2` or higher):
+- Control plane CPU/memory usage is high
+- Many concurrent container group jobs
+- Job event processing is slow
+- Need to throttle concurrent jobs
+
+**Decrease** (`AWX_CONTROL_NODE_TASK_IMPACT = 0.5` or lower):
+- Control plane is underutilized
+- Most jobs run on execution nodes
+- Want more concurrent job control
+
+**Configuration**:
+```python
+# /etc/tower/conf.d/capacity.py
+AWX_CONTROL_NODE_TASK_IMPACT = 2  # More conservative
+```
+
+<Warning>
+Container groups have effectively infinite capacity. Without proper control plane throttling, you can overwhelm your control nodes with too many concurrent jobs.
+</Warning>
+
+## Instance Groups
+
+### Instance Group Capacity
+
+Instance groups aggregate capacity from member instances. Configure group-wide limits:
+
+#### max_concurrent_jobs
+
+Maximum concurrent jobs across entire group:
+
+```bash
+curl -X PATCH https://awx.example.org/api/v2/instance_groups/1/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"max_concurrent_jobs": 50}'
+```
+
+#### max_forks
+
+Maximum total forks across entire group:
+
+```bash
+curl -X PATCH https://awx.example.org/api/v2/instance_groups/1/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"max_forks": 200}'
+```
+
+### Container Group Capacity Planning
+
+#### Calculate max_concurrent_jobs
+
+Based on pod resource requests:
+
+```
+max_concurrent_jobs = (node_memory_mb * 1024) // pod_memory_mb
+```
+
+**Example**: 8GB node, 100MB pod
+```
+(8 * 1024) // 100 = 81 jobs
+```
+
+#### Calculate max_forks
+
+Based on Ansible memory usage (100MB per fork):
+
+```
+max_forks = (node_memory_mb * 1024) // 100
+```
+
+**Example**: 8GB node
+```
+(8 * 1024) // 100 = 81 forks
+```
+
+With `max_forks=81`:
+- 81 jobs with 1 fork each, OR
+- 40 jobs with 2 forks each, OR
+- 2 jobs with 40 forks each
+
+**Configure Container Group**:
+```bash
+curl -X PATCH https://awx.example.org/api/v2/instance_groups/2/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "max_concurrent_jobs": 81,
+    "max_forks": 81
+  }'
+```
+
+## Capacity Monitoring
+
+### Check Instance Capacity
+
+```bash
+# View all instances
+curl https://awx.example.org/api/v2/instances/ \
+  -H "Authorization: Bearer <token>" | jq '.results[] | {
+    hostname: .hostname,
+    capacity: .capacity,
+    consumed_capacity: .consumed_capacity,
+    percent_used: ((.consumed_capacity / .capacity) * 100)
+  }'
+```
+
+### Monitor Running Jobs
+
+```bash
+# Check jobs by status
+curl https://awx.example.org/api/v2/jobs/?status=running \
+  -H "Authorization: Bearer <token>" | jq '.count'
+
+# View jobs waiting for capacity
+curl https://awx.example.org/api/v2/jobs/?status=pending \
+  -H "Authorization: Bearer <token>" | jq '.results[] | {
+    id: .id,
+    name: .name,
+    status: .status
+  }'
+```
+
+### Instance Group Status
+
+```bash
+# Check instance group capacity
+curl https://awx.example.org/api/v2/instance_groups/ \
+  -H "Authorization: Bearer <token>" | jq '.results[] | {
+    name: .name,
+    capacity: .capacity,
+    consumed_capacity: .consumed_capacity,
+    jobs_running: .jobs_running,
+    jobs_total: .jobs_total
+  }'
+```
+
+## Capacity Optimization
+
+### Recommendations by Workload
+
+#### I/O-Bound Workloads
+(Network operations, cloud APIs, service calls)
+
+```python
+# Prefer memory capacity
+SYSTEM_TASK_FORKS_MEM = 100
+SYSTEM_TASK_FORKS_CPU = 6  # Higher allows more overcommit
+```
+
+On instances:
+```bash
+curl -X PATCH https://awx.example.org/api/v2/instances/1/ \
+  -d '{"capacity_adjustment": 1.0}'  # Use memory capacity
+```
+
+#### CPU-Bound Workloads
+(Computation, template rendering, encryption)
+
+```python
+# Prefer CPU capacity
+SYSTEM_TASK_FORKS_MEM = 150  # Higher than default
+SYSTEM_TASK_FORKS_CPU = 4
+```
+
+On instances:
+```bash
+curl -X PATCH https://awx.example.org/api/v2/instances/1/ \
+  -d '{"capacity_adjustment": 0.0}'  # Use CPU capacity
+```
+
+#### Mixed Workloads
+
+```python
+# Balanced settings
+SYSTEM_TASK_FORKS_MEM = 120
+SYSTEM_TASK_FORKS_CPU = 5
+```
+
+On instances:
+```bash
+curl -X PATCH https://awx.example.org/api/v2/instances/1/ \
+  -d '{"capacity_adjustment": 0.5}'  # Balanced
+```
+
+### Instance Sizing Guidelines
+
+| Instance Type | vCPU | Memory | Est. Capacity | Workload |
+|---------------|------|---------|---------------|----------|
+| Small | 2 | 4 GB | ~8-20 forks | Dev/test |
+| Medium | 4 | 8 GB | ~24-60 forks | Light production |
+| Large | 8 | 16 GB | ~56-140 forks | Production |
+| XLarge | 16 | 32 GB | ~120-300 forks | Heavy production |
+
+### Dedicated Instance Groups
+
+Create dedicated groups for specific workloads:
+
+```bash
+# Create high-memory group for large inventories
+curl -X POST https://awx.example.org/api/v2/instance_groups/ \
+  -H "Authorization: Bearer <token>" \
+  -d '{
+    "name": "high-memory",
+    "max_concurrent_jobs": 10,
+    "max_forks": 100
+  }'
+
+# Create CPU-optimized group for compute-heavy jobs
+curl -X POST https://awx.example.org/api/v2/instance_groups/ \
+  -d '{
+    "name": "cpu-optimized",
+    "max_concurrent_jobs": 50,
+    "max_forks": 50
+  }'
+```
+
+## Troubleshooting
+
+### Jobs Stuck in Pending
+
+**Cause**: Insufficient capacity
+
+```bash
+# Check instance capacity
+curl https://awx.example.org/api/v2/instances/ | jq '.results[] | {
+  hostname, capacity, consumed_capacity
+}'
+
+# Check instance group assignments
+curl https://awx.example.org/api/v2/jobs/123/ | jq '.instance_group'
+```
+
+**Solutions**:
+1. Add more instances to the group
+2. Increase instance capacity (add memory/CPU)
+3. Adjust `capacity_adjustment` to 1.0
+4. Reduce job fork counts
+5. Add fallback instance groups
+
+### Capacity Calculations Seem Wrong
+
+```bash
+# Check capacity settings
+awx-manage shell -c "
+from django.conf import settings
+print(f'SYSTEM_TASK_FORKS_MEM: {settings.SYSTEM_TASK_FORKS_MEM}')
+print(f'SYSTEM_TASK_FORKS_CPU: {settings.SYSTEM_TASK_FORKS_CPU}')
+print(f'AWX_CONTROL_NODE_TASK_IMPACT: {settings.AWX_CONTROL_NODE_TASK_IMPACT}')
+"
+
+# Force instance health check
+curl -X POST https://awx.example.org/api/v2/instances/1/health_check/ \
+  -H "Authorization: Bearer <token>"
+```
+
+### High Memory Usage
+
+**Symptoms**: Jobs failing with OOM, system slowness
+
+**Solutions**:
+1. Reduce `SYSTEM_TASK_FORKS_MEM` (more conservative)
+2. Use CPU capacity (`capacity_adjustment=0.0`)
+3. Reduce `JOB_EVENT_WORKERS`
+4. Limit concurrent jobs on instance group
+5. Add more memory to instances
+
+### High CPU Usage
+
+**Symptoms**: Slow job execution, high load average
+
+**Solutions**:
+1. Reduce `SYSTEM_TASK_FORKS_CPU` 
+2. Use memory capacity (`capacity_adjustment=1.0`)
+3. Add more CPU cores
+4. Reduce job forks in templates
+5. Use dedicated execution nodes
+
+## Best Practices
+
+1. **Monitor continuously**: Track capacity metrics and adjust as needed
+2. **Start conservative**: Begin with lower capacity and increase gradually
+3. **Separate workloads**: Use dedicated instance groups for different job types
+4. **Test under load**: Simulate production load before going live
+5. **Document changes**: Keep records of capacity adjustments and their effects
+6. **Plan for growth**: Size instances with 20-30% headroom
+7. **Use execution nodes**: Offload job execution from control plane
+8. **Throttle container groups**: Set appropriate `max_concurrent_jobs` limits
+
+## Related Resources
+
+- [Configuration](/admin/configuration) - Configure capacity settings
+- [Metrics](/admin/metrics) - Monitor capacity usage
+- [Clustering](https://github.com/ansible/awx/blob/devel/docs/clustering.md) - Instance groups and clustering

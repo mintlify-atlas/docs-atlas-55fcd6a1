@@ -1,0 +1,313 @@
+---
+title: 'Pagination'
+description: 'Handle paginated API responses in AWX'
+---
+
+## Overview
+
+AWX API list endpoints return paginated responses to manage large datasets efficiently. The pagination implementation is defined in `awx/api/pagination.py`.
+
+## Default Pagination
+
+By default, AWX uses page number pagination with the following characteristics:
+
+- **Default page size**: Based on DRF settings
+- **Maximum page size**: Controlled by `MAX_PAGE_SIZE` setting
+- **Page query parameter**: `page`
+- **Page size query parameter**: `page_size`
+
+## Paginated Response Structure
+
+```json
+{
+  "count": 150,
+  "next": "https://awx.example.com/api/v2/job_templates/?page=2",
+  "previous": null,
+  "results": [
+    {
+      "id": 1,
+      "name": "Deploy Application",
+      "description": "Deploy app to production"
+    },
+    {
+      "id": 2,
+      "name": "Backup Database",
+      "description": "Daily database backup"
+    }
+  ]
+}
+```
+
+<ResponseField name="count" type="integer">
+  Total number of items across all pages
+</ResponseField>
+
+<ResponseField name="next" type="string">
+  URL to the next page (null if last page)
+</ResponseField>
+
+<ResponseField name="previous" type="string">
+  URL to the previous page (null if first page)
+</ResponseField>
+
+<ResponseField name="results" type="array">
+  Array of resource objects for the current page
+</ResponseField>
+
+## Query Parameters
+
+### Page Number
+
+Navigate to a specific page:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/job_templates/?page=2" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Page Size
+
+Control the number of items per page:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/job_templates/?page_size=50" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ParamField query="page" type="integer" default="1">
+  Page number to retrieve
+</ParamField>
+
+<ParamField query="page_size" type="integer">
+  Number of results per page (max: MAX_PAGE_SIZE setting)
+</ParamField>
+
+### Maximum Page Size
+
+If you request a `page_size` larger than the configured `MAX_PAGE_SIZE`, it will be automatically capped:
+
+```bash
+# Request 1000 items, but only MAX_PAGE_SIZE returned
+curl -X GET \
+  "https://awx.example.com/api/v2/inventories/?page_size=1000" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Disabled Count Pagination
+
+For large datasets, counting all results can be expensive. Use `count_disabled` to skip counting:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/job_events/?count_disabled=1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ParamField query="count_disabled" type="boolean">
+  Skip counting total results for performance
+</ParamField>
+
+With `count_disabled=1`, the response structure changes:
+
+```json
+{
+  "results": [
+    {
+      "id": 1,
+      "event": "playbook_on_start"
+    }
+  ]
+}
+```
+
+<Info>
+  The `count` field is omitted and a fixed value is used internally to determine pagination
+</Info>
+
+## Limit Pagination
+
+For event endpoints like job events, you can use limit-based pagination instead:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/jobs/123/job_events/?limit=100" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ParamField query="limit" type="integer">
+  Maximum number of results to return (used by UnifiedJobEventPagination)
+</ParamField>
+
+Response with limit pagination:
+
+```json
+{
+  "results": [
+    {"id": 1, "event": "runner_on_start"},
+    {"id": 2, "event": "runner_on_ok"}
+  ]
+}
+```
+
+## Pagination Classes
+
+AWX uses different pagination classes based on the endpoint:
+
+### Pagination (Default)
+
+Used by most list endpoints:
+- Page-based navigation
+- Configurable page size
+- Full result count
+
+### LimitPagination
+
+Used for simple result limiting:
+- No page navigation
+- Just limits result count
+- Returns results array only
+
+### UnifiedJobEventPagination
+
+Used for job event endpoints:
+- Supports both page and limit parameters
+- Automatically switches based on query params
+- Optimized for streaming events
+
+## Iterating Through Pages
+
+### Python Example
+
+```python
+import requests
+
+base_url = "https://awx.example.com/api/v2/job_templates/"
+headers = {"Authorization": "Bearer YOUR_TOKEN"}
+
+all_templates = []
+url = base_url
+
+while url:
+    response = requests.get(url, headers=headers)
+    data = response.json()
+    
+    all_templates.extend(data['results'])
+    url = data.get('next')
+
+print(f"Retrieved {len(all_templates)} templates")
+```
+
+### Bash Example
+
+```bash
+#!/bin/bash
+
+BASE_URL="https://awx.example.com/api/v2/inventories/"
+TOKEN="YOUR_TOKEN"
+url="$BASE_URL"
+
+while [ "$url" != "null" ] && [ -n "$url" ]; do
+    response=$(curl -s -H "Authorization: Bearer $TOKEN" "$url")
+    
+    # Process results
+    echo "$response" | jq '.results[]'
+    
+    # Get next URL
+    url=$(echo "$response" | jq -r '.next')
+done
+```
+
+## Combining with Filtering and Ordering
+
+Pagination works seamlessly with filtering and ordering:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/jobs/?status=successful&order_by=-created&page_size=20&page=1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Performance Considerations
+
+<AccordionGroup>
+  <Accordion title="Use Appropriate Page Sizes">
+    Balance between number of requests and response size. Too small = many requests, too large = slow responses.
+  </Accordion>
+
+  <Accordion title="Use count_disabled for Large Datasets">
+    When iterating through all results, skip counting to improve performance:
+    ```
+    ?count_disabled=1&page_size=200
+    ```
+  </Accordion>
+
+  <Accordion title="Cache Results When Possible">
+    If data doesn't change frequently, cache paginated results to reduce API calls.
+  </Accordion>
+
+  <Accordion title="Use Limit for Event Streams">
+    For job events and similar resources, use `limit` instead of pagination:
+    ```
+    /api/v2/jobs/123/job_events/?limit=1000
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Error Handling
+
+### Invalid Page Number
+
+```json
+{
+  "detail": "Invalid page."
+}
+```
+
+Returned when requesting a page beyond the last page.
+
+### Invalid Page Size
+
+Excessive page sizes are automatically capped to `MAX_PAGE_SIZE`.
+
+## Examples
+
+### Get First Page with Custom Size
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/organizations/?page=1&page_size=25" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Get All Job Events with Limit
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/jobs/456/job_events/?limit=500" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Paginate Without Count
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/activity_stream/?count_disabled=1&page_size=100" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Related Configuration
+
+Pagination behavior is controlled by Django settings:
+
+- `MAX_PAGE_SIZE` - Maximum allowed page size
+- `PAGE_SIZE` - Default page size (DRF setting)
+
+Check your AWX configuration:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/config/" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```

@@ -1,0 +1,396 @@
+---
+title: 'Filtering & Search'
+description: 'Filter and search resources in AWX API'
+---
+
+## Overview
+
+AWX provides powerful filtering and search capabilities based on Django REST Framework and `ansible_base.rest_filters.rest_framework.field_lookup_backend.FieldLookupBackend`.
+
+## Basic Filtering
+
+Filter resources by field values using query parameters:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/job_templates/?name=Deploy" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ParamField query="field_name" type="string">
+  Filter by exact field value
+</ParamField>
+
+## Field Lookups
+
+Use Django-style field lookups for advanced filtering:
+
+### Exact Match
+
+```bash
+# Exact match (default)
+?name=Deploy
+?name__exact=Deploy
+```
+
+### Contains
+
+```bash
+# Case-sensitive contains
+?name__contains=deploy
+
+# Case-insensitive contains
+?name__icontains=deploy
+```
+
+### Starts With / Ends With
+
+```bash
+# Starts with
+?name__startswith=Deploy
+?name__istartswith=deploy  # case-insensitive
+
+# Ends with
+?name__endswith=Production
+?name__iendswith=production  # case-insensitive
+```
+
+### Comparisons
+
+```bash
+# Greater than
+?id__gt=10
+
+# Greater than or equal
+?id__gte=10
+
+# Less than
+?id__lt=100
+
+# Less than or equal
+?id__lte=100
+```
+
+### In List
+
+```bash
+# Match any value in list (comma-separated)
+?id__in=1,2,3,4,5
+?status__in=successful,failed
+```
+
+### Null / Not Null
+
+```bash
+# Is null
+?description__isnull=true
+
+# Is not null
+?description__isnull=false
+```
+
+### Boolean Fields
+
+```bash
+# Boolean values
+?enabled=true
+?enabled=false
+```
+
+### Date/Time Filtering
+
+```bash
+# Exact date
+?created=2024-01-15
+
+# Date range
+?created__gte=2024-01-01
+?created__lte=2024-12-31
+
+# Year, month, day
+?created__year=2024
+?created__month=1
+?created__day=15
+
+# Time components
+?created__hour=10
+?created__minute=30
+```
+
+## Search
+
+Many endpoints support full-text search across multiple fields:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/job_templates/?search=deploy" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ParamField query="search" type="string">
+  Search across multiple fields (name, description, etc.)
+</ParamField>
+
+The search parameter typically searches:
+- `name`
+- `description`
+- Other relevant text fields
+
+## Combining Filters
+
+Combine multiple filters using `&`:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/jobs/?status=successful&job_type=run&created__gte=2024-01-01" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Ordering
+
+Sort results using the `order_by` parameter:
+
+```bash
+# Ascending order
+?order_by=name
+
+# Descending order (prefix with -)
+?order_by=-created
+
+# Multiple fields
+?order_by=status,-created
+```
+
+<ParamField query="order_by" type="string">
+  Field name(s) to sort by. Prefix with `-` for descending order
+</ParamField>
+
+### Common Ordering Fields
+
+```bash
+# By name
+?order_by=name
+
+# By creation date (newest first)
+?order_by=-created
+
+# By modification date
+?order_by=-modified
+
+# By ID
+?order_by=id
+
+# Multiple: status ascending, then created descending
+?order_by=status,-created
+```
+
+## Related Field Filtering
+
+Filter by related object fields using double underscores:
+
+```bash
+# Filter by organization name
+?organization__name=Default
+
+# Filter by inventory ID
+?inventory__id=5
+
+# Filter by project SCM type
+?project__scm_type=git
+
+# Filter by organization and created date
+?organization__name=Engineering&created__gte=2024-01-01
+```
+
+## Special Filters
+
+### Smart Inventory Host Filters
+
+Inventories support complex host filtering:
+
+```bash
+# Filter inventory by host_filter field
+?host_filter=ansible_facts__ansible_distribution__icontains=ubuntu
+```
+
+### JSON Field Filtering
+
+Filter on JSON fields (variables, extra_vars, etc.):
+
+```bash
+# Note: ansible_facts does not support all lookups
+?ansible_facts__ansible_os_family=Debian
+```
+
+<Warning>
+  JSON field filtering has limitations. Some lookups like `__contains` may not work with `ansible_facts`.
+</Warning>
+
+## Type Filtering
+
+Filter by resource type in unified endpoints:
+
+```bash
+# Filter unified jobs by type
+?type=job
+?type=project_update
+?type=inventory_update
+```
+
+## Examples
+
+### Find Failed Jobs from Last Week
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/jobs/?status=failed&created__gte=2024-01-08&order_by=-created" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Search Job Templates by Name
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/job_templates/?name__icontains=deploy&order_by=name" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Find Organizations with Projects
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/organizations/?summary_fields__related_field_counts__projects__gt=0" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Get Running Jobs
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/jobs/?status__in=pending,waiting,running" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Filter by Multiple Organizations
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/inventories/?organization__in=1,2,3" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Find Inventories Without Description
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/inventories/?description__isnull=true" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Pagination with Filtering
+
+Filters work seamlessly with pagination:
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/jobs/?status=successful&page_size=50&page=1&order_by=-created" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Discovering Filterable Fields
+
+Use OPTIONS to discover filterable fields:
+
+```bash
+curl -X OPTIONS \
+  "https://awx.example.com/api/v2/job_templates/" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+The response includes:
+- Available filters
+- Search fields
+- Ordering fields
+
+## Filter Performance Tips
+
+<AccordionGroup>
+  <Accordion title="Use Indexed Fields">
+    Filter on indexed fields (id, created, modified, status) for better performance:
+    ```
+    ?status=successful&created__gte=2024-01-01
+    ```
+  </Accordion>
+
+  <Accordion title="Avoid Complex JSON Queries">
+    Filtering on deeply nested JSON fields can be slow. Use indexed fields when possible.
+  </Accordion>
+
+  <Accordion title="Use Specific Filters">
+    Prefer specific filters over broad search terms:
+    ```
+    # Better
+    ?name__startswith=Deploy
+    
+    # Slower
+    ?search=Deploy
+    ```
+  </Accordion>
+
+  <Accordion title="Combine with count_disabled">
+    When filtering large datasets and iterating, disable counting:
+    ```
+    ?status=failed&count_disabled=1&page_size=100
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Filter Patterns
+
+### Active/Recent Resources
+
+```bash
+# Jobs from last 24 hours
+?created__gte=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%S)
+
+# Currently running jobs
+?status__in=pending,waiting,running
+```
+
+### User's Resources
+
+```bash
+# Resources created by specific user
+?created_by__id=5
+
+# Modified by specific user
+?modified_by__username=admin
+```
+
+### By Organization
+
+```bash
+# All resources in organization
+?organization=1
+
+# By organization name
+?organization__name=Engineering
+```
+
+## Error Responses
+
+### Invalid Filter Field
+
+```json
+{
+  "detail": "Invalid filter field: invalid_field"
+}
+```
+
+### Invalid Lookup
+
+```json
+{
+  "detail": "Unsupported lookup 'invalid' for field 'name'"
+}
+```

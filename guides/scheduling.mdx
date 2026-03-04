@@ -1,0 +1,615 @@
+---
+title: Scheduling Jobs
+description: Learn how to schedule automated job execution in AWX using RRULE specifications
+---
+
+AWX allows you to schedule jobs to run automatically at specific times or intervals using recurrence rules (RRULE) based on RFC5545.
+
+## Understanding Schedules
+
+Schedules in AWX:
+
+- Use **RRULE** (Recurrence Rule) format from RFC5545
+- Support complex patterns (daily, weekly, monthly, etc.)
+- Can be attached to multiple resource types
+- Respect timezone specifications
+- Support both one-time and recurring execution
+
+### Schedulable Resources
+
+<CardGroup cols={2}>
+  <Card title="Job Templates" icon="play">
+    Schedule playbook execution
+  </Card>
+  
+  <Card title="Project Updates" icon="code-branch">
+    Schedule SCM syncs
+  </Card>
+  
+  <Card title="Inventory Sources" icon="server">
+    Schedule inventory synchronization
+  </Card>
+  
+  <Card title="Workflow Templates" icon="diagram-project">
+    Schedule workflow execution
+  </Card>
+</CardGroup>
+
+## RRULE Format
+
+Schedules use DTSTART (start date/time) and RRULE (recurrence rule):
+
+```
+DTSTART:20260115T120000Z RRULE:FREQ=DAILY;INTERVAL=1;COUNT=7
+```
+
+### RRULE Components
+
+- **DTSTART**: Start date and time (required)
+- **FREQ**: Frequency (MINUTELY, HOURLY, DAILY, WEEKLY, MONTHLY, YEARLY)
+- **INTERVAL**: Interval between occurrences
+- **COUNT**: Number of occurrences (optional)
+- **UNTIL**: End date/time (optional)
+- **BYDAY**: Days of week (MO, TU, WE, TH, FR, SA, SU)
+- **BYMONTH**: Months (1-12)
+- **BYMONTHDAY**: Days of month (1-31)
+- **BYHOUR**: Hours (0-23)
+- **BYMINUTE**: Minutes (0-59)
+
+## Creating Schedules
+
+### Simple Daily Schedule
+
+<Tabs>
+  <Tab title="Web UI">
+    1. Navigate to your job template/project/inventory source
+    2. Click the **Schedules** tab
+    3. Click **Add**
+    4. Configure:
+       - **Name**: Schedule name
+       - **Start Date/Time**: When to start
+       - **Timezone**: Local timezone
+       - **Frequency**: Daily, Weekly, etc.
+       - **Interval**: Every N days/weeks
+    5. Click **Save**
+  </Tab>
+
+  <Tab title="API">
+    ```bash
+    curl -X POST https://awx.example.com/api/v2/job_templates/1/schedules/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "Daily Backup",
+        "rrule": "DTSTART:20260115T020000Z RRULE:FREQ=DAILY;INTERVAL=1",
+        "enabled": true
+      }'
+    ```
+  </Tab>
+
+  <Tab title="Ansible">
+    ```yaml
+    - name: Create daily schedule
+      awx.awx.schedule:
+        name: Daily Backup
+        unified_job_template: Backup Job Template
+        rrule: "DTSTART:20260115T020000Z RRULE:FREQ=DAILY;INTERVAL=1"
+        enabled: true
+        state: present
+        controller_host: awx.example.com
+        controller_oauthtoken: "{{ awx_token }}"
+    ```
+  </Tab>
+</Tabs>
+
+## Common Schedule Examples
+
+### Every Day at 2 AM UTC
+
+```yaml
+rrule: "DTSTART:20260115T020000Z RRULE:FREQ=DAILY;INTERVAL=1"
+```
+
+### Every Weekday at 6 PM
+
+```yaml
+rrule: "DTSTART;TZID=America/New_York:20260115T180000 RRULE:FREQ=DAILY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR"
+```
+
+### Every Week on Monday at 8 AM
+
+```yaml
+rrule: "DTSTART:20260119T080000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO"
+```
+
+### Every 2 Weeks on Monday and Thursday
+
+```yaml
+rrule: "DTSTART:20260115T090000Z RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH"
+```
+
+### Every Month on the 1st at Midnight
+
+```yaml
+rrule: "DTSTART:20260101T000000Z RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=1"
+```
+
+### Every 3 Months on the 15th
+
+```yaml
+rrule: "DTSTART:20260115T120000Z RRULE:FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=15"
+```
+
+### Last Saturday of Every Month
+
+```yaml
+rrule: "DTSTART:20260125T100000Z RRULE:FREQ=MONTHLY;INTERVAL=1;BYDAY=SA;BYMONTHDAY=25,26,27,28,29,30,31;BYSETPOS=-1"
+```
+
+Or simpler:
+```yaml
+rrule: "DTSTART:20260131T100000Z RRULE:FREQ=MONTHLY;INTERVAL=1;BYDAY=SA;BYMONTHDAY=12,13,14,15,16,17,18"
+```
+
+### Every 15 Minutes
+
+```yaml
+rrule: "DTSTART:20260115T000000Z RRULE:FREQ=MINUTELY;INTERVAL=15"
+```
+
+### Every Hour During Business Hours (9 AM - 5 PM)
+
+```yaml
+rrule: "DTSTART;TZID=America/New_York:20260115T090000 RRULE:FREQ=HOURLY;INTERVAL=1;BYHOUR=9,10,11,12,13,14,15,16,17"
+```
+
+### First Monday of Every Month
+
+```yaml
+rrule: "DTSTART:20260105T090000Z RRULE:FREQ=MONTHLY;INTERVAL=1;BYDAY=MO;BYMONTHDAY=1,2,3,4,5,6,7"
+```
+
+## Advanced Scheduling
+
+### Limited Occurrence Count
+
+Run 10 times then stop:
+
+```yaml
+rrule: "DTSTART:20260115T120000Z RRULE:FREQ=DAILY;INTERVAL=1;COUNT=10"
+```
+
+### With End Date (UNTIL)
+
+Run until a specific date:
+
+```yaml
+rrule: "DTSTART:20260115T120000Z RRULE:FREQ=DAILY;INTERVAL=1;UNTIL=20260215T120000Z"
+```
+
+<Note>
+  When using UNTIL, the datetime must be in UTC (Z suffix) regardless of the DTSTART timezone.
+</Note>
+
+### Exclusion Rules (EXRULE)
+
+<Warning>
+  EXRULE is deprecated in RFC5545 and not fully supported in AWX. Use alternative scheduling approaches.
+</Warning>
+
+For exclusions, create multiple schedules or use external orchestration.
+
+## Timezone Handling
+
+### UTC Timezone
+
+Use the `Z` suffix for UTC times:
+
+```yaml
+DTSTART:20260115T120000Z
+```
+
+### Local Timezone
+
+Use `TZID` parameter:
+
+```yaml
+DTSTART;TZID=America/New_York:20260115T120000
+```
+
+### Available Timezones
+
+Get list of valid timezone identifiers:
+
+```bash
+curl https://awx.example.com/api/v2/schedules/zoneinfo/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Common timezones:
+- `America/New_York` (US Eastern)
+- `America/Chicago` (US Central)
+- `America/Denver` (US Mountain)
+- `America/Los_Angeles` (US Pacific)
+- `Europe/London`
+- `Europe/Paris`
+- `Asia/Tokyo`
+- `Australia/Sydney`
+
+## Previewing Schedules
+
+Preview the next 10 occurrences:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/schedules/preview/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rrule": "DTSTART;TZID=America/New_York:20260115T120000 RRULE:FREQ=DAILY;INTERVAL=1;COUNT=10"
+  }'
+```
+
+Response:
+```json
+{
+  "local": [
+    "2026-01-15T12:00:00-05:00",
+    "2026-01-16T12:00:00-05:00",
+    "2026-01-17T12:00:00-05:00",
+    "2026-01-18T12:00:00-05:00",
+    "2026-01-19T12:00:00-05:00"
+  ],
+  "utc": [
+    "2026-01-15T17:00:00Z",
+    "2026-01-16T17:00:00Z",
+    "2026-01-17T17:00:00Z",
+    "2026-01-18T17:00:00Z",
+    "2026-01-19T17:00:00Z"
+  ]
+}
+```
+
+## Schedule with Extra Variables
+
+Pass variables when the schedule runs:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/job_templates/1/schedules/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Weekly Cleanup",
+    "rrule": "DTSTART:20260119T020000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO",
+    "extra_data": {
+      "cleanup_days": 30,
+      "send_report": true
+    }
+  }'
+```
+
+With Ansible:
+
+```yaml
+- name: Create schedule with variables
+  awx.awx.schedule:
+    name: Weekly Cleanup
+    unified_job_template: Cleanup Job Template
+    rrule: "DTSTART:20260119T020000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO"
+    extra_data:
+      cleanup_days: 30
+      send_report: true
+    state: present
+```
+
+## Managing Schedules
+
+### List All Schedules
+
+```bash
+# List all schedules
+curl https://awx.example.com/api/v2/schedules/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# List schedules for a job template
+curl https://awx.example.com/api/v2/job_templates/1/schedules/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Enable/Disable Schedule
+
+<Tabs>
+  <Tab title="API">
+    ```bash
+    # Disable schedule
+    curl -X PATCH https://awx.example.com/api/v2/schedules/1/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"enabled": false}'
+
+    # Enable schedule
+    curl -X PATCH https://awx.example.com/api/v2/schedules/1/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"enabled": true}'
+    ```
+  </Tab>
+
+  <Tab title="Ansible">
+    ```yaml
+    # Disable schedule
+    - name: Disable schedule
+      awx.awx.schedule:
+        name: Daily Backup
+        unified_job_template: Backup Job Template
+        enabled: false
+        state: present
+
+    # Enable schedule
+    - name: Enable schedule
+      awx.awx.schedule:
+        name: Daily Backup
+        unified_job_template: Backup Job Template
+        enabled: true
+        state: present
+    ```
+  </Tab>
+</Tabs>
+
+### Update Schedule
+
+```yaml
+- name: Update schedule time
+  awx.awx.schedule:
+    name: Daily Backup
+    unified_job_template: Backup Job Template
+    rrule: "DTSTART:20260115T040000Z RRULE:FREQ=DAILY;INTERVAL=1"  # Changed to 4 AM
+    state: present
+```
+
+### Delete Schedule
+
+```yaml
+- name: Delete schedule
+  awx.awx.schedule:
+    name: Daily Backup
+    unified_job_template: Backup Job Template
+    state: absent
+```
+
+## Multiple Schedules
+
+A single job template can have multiple schedules:
+
+```yaml
+- name: Weekday schedule
+  awx.awx.schedule:
+    name: Weekday Deployment
+    unified_job_template: Deploy Application
+    rrule: "DTSTART:20260119T180000Z RRULE:FREQ=DAILY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR"
+    state: present
+
+- name: Weekend schedule
+  awx.awx.schedule:
+    name: Weekend Maintenance
+    unified_job_template: System Maintenance
+    rrule: "DTSTART:20260124T020000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=SA"
+    state: present
+```
+
+## Schedule for Different Resources
+
+### Job Template Schedule
+
+```yaml
+- name: Schedule job template
+  awx.awx.schedule:
+    name: Nightly Backup
+    unified_job_template: Backup Job Template
+    rrule: "DTSTART:20260115T020000Z RRULE:FREQ=DAILY;INTERVAL=1"
+    state: present
+```
+
+### Project Update Schedule
+
+```yaml
+- name: Schedule project sync
+  awx.awx.schedule:
+    name: Hourly Project Sync
+    unified_job_template: Infrastructure Playbooks  # Project name
+    rrule: "DTSTART:20260115T000000Z RRULE:FREQ=HOURLY;INTERVAL=1"
+    state: present
+```
+
+### Inventory Source Schedule
+
+```bash
+curl -X POST https://awx.example.com/api/v2/inventory_sources/1/schedules/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "EC2 Inventory Sync",
+    "rrule": "DTSTART:20260115T000000Z RRULE:FREQ=HOURLY;INTERVAL=6"
+  }'
+```
+
+### Workflow Template Schedule
+
+```yaml
+- name: Schedule workflow
+  awx.awx.schedule:
+    name: Weekly Release Pipeline
+    unified_job_template: Release Workflow
+    rrule: "DTSTART:20260119T090000Z RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO"
+    state: present
+```
+
+## RRULE Limitations in AWX
+
+AWX enforces these constraints:
+
+<Warning>
+- RRULE must start with DTSTART
+- At least one RRULE entry required
+- Only one DTSTART allowed
+- RDATE and EXDATE are prohibited
+- INTERVAL must be included
+- FREQ=SECONDLY is prohibited
+- BYDAY with numeric prefix (e.g., 1MO, -1FR) is prohibited
+- Cannot use both COUNT and UNTIL in same rule
+- COUNT cannot exceed 999
+</Warning>
+
+## Monitoring Scheduled Jobs
+
+### View Next Run Time
+
+```bash
+curl https://awx.example.com/api/v2/schedules/1/ \
+  -H "Authorization: Bearer YOUR_TOKEN" | jq '{name, next_run, dtstart, dtend}'
+```
+
+Response:
+```json
+{
+  "name": "Daily Backup",
+  "next_run": "2026-01-16T02:00:00Z",
+  "dtstart": "2026-01-15T02:00:00Z",
+  "dtend": null
+}
+```
+
+### View Recent Scheduled Jobs
+
+```bash
+# List jobs triggered by a schedule
+curl 'https://awx.example.com/api/v2/jobs/?schedule=1' \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Appropriate Intervals" icon="clock">
+    Don't schedule jobs too frequently - consider resource impact and job duration
+  </Card>
+
+  <Card title="Set Timeouts" icon="stopwatch">
+    Configure job timeouts to prevent long-running scheduled jobs from blocking
+  </Card>
+
+  <Card title="Monitor Failures" icon="triangle-exclamation">
+    Set up notifications for scheduled job failures
+  </Card>
+
+  <Card title="Use Local Timezones" icon="earth-americas">
+    Use TZID for business-hours schedules to handle daylight saving time
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Schedule not running at expected time">
+    Check:
+    - Schedule is enabled (`"enabled": true`)
+    - DTSTART is in the future
+    - Timezone is correct
+    - AWX scheduler service is running
+    
+    View schedule details:
+    ```bash
+    curl https://awx.example.com/api/v2/schedules/1/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Accordion>
+
+  <Accordion title="Invalid RRULE error">
+    Common issues:
+    - Missing INTERVAL in RRULE
+    - Invalid DTSTART format
+    - Using prohibited features (RDATE, EXDATE, BYDAY=1MO)
+    - COUNT and UNTIL both specified
+    
+    Test your RRULE:
+    ```bash
+    curl -X POST https://awx.example.com/api/v2/schedules/preview/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"rrule": "YOUR_RRULE_HERE"}'
+    ```
+  </Accordion>
+
+  <Accordion title="Scheduled jobs skip occurrences">
+    Possible causes:
+    - Previous job still running (if simultaneous = false)
+    - Instance capacity exhausted
+    - Job template was modified/disabled
+    
+    Check job template settings:
+    ```yaml
+    allow_simultaneous: false  # Change to true if needed
+    ```
+  </Accordion>
+
+  <Accordion title="Timezone not working as expected">
+    Ensure:
+    - Using valid TZID from `/api/v2/schedules/zoneinfo/`
+    - TZID syntax: `DTSTART;TZID=America/New_York:20260115T120000`
+    - Note: No Z suffix when using TZID
+    - UNTIL must still be in UTC (with Z suffix)
+    
+    Verify with preview:
+    ```bash
+    curl -X POST https://awx.example.com/api/v2/schedules/preview/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"rrule": "DTSTART;TZID=America/New_York:20260115T120000 RRULE:FREQ=DAILY;INTERVAL=1;COUNT=5"}'
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Complex Scheduling Scenarios
+
+### Business Days Only
+
+```yaml
+rrule: "DTSTART:20260119T090000Z RRULE:FREQ=DAILY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR"
+```
+
+### Quarterly on First Monday
+
+```yaml
+rrule: "DTSTART:20260105T100000Z RRULE:FREQ=MONTHLY;INTERVAL=3;BYDAY=MO;BYMONTHDAY=1,2,3,4,5,6,7"
+```
+
+### Every 4 Hours During Work Days
+
+```yaml
+rrule: "DTSTART;TZID=America/New_York:20260119T080000 RRULE:FREQ=HOURLY;INTERVAL=4;BYDAY=MO,TU,WE,TH,FR;BYHOUR=8,12,16"
+```
+
+### Twice a Month (1st and 15th)
+
+```yaml
+rrule: "DTSTART:20260101T120000Z RRULE:FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=1,15"
+```
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Job Templates" icon="play" href="/guides/running-jobs">
+    Create job templates to schedule
+  </Card>
+  
+  <Card title="Workflows" icon="diagram-project" href="/api/overview">
+    Schedule complex workflows
+  </Card>
+  
+  <Card title="Notifications" icon="bell" href="/guides/notifications">
+    Get notified about scheduled job results
+  </Card>
+  
+  <Card title="RFC5545 Specification" icon="book" href="https://www.rfc-editor.org/rfc/rfc5545.txt">
+    Full RRULE specification reference
+  </Card>
+</CardGroup>

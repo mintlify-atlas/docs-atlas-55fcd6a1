@@ -1,0 +1,416 @@
+---
+title: Architecture Overview
+description: High-level architecture and core concepts of AWX
+---
+
+AWX provides a web interface and distributed task engine for scheduling and running Ansible playbooks. This document provides a birds-eye view of AWX's architecture and its integration with Ansible.
+
+## Core Concepts
+
+AWX abstracts and extends Ansible's functionality to provide a web-based automation platform. Understanding these core concepts is essential for working with AWX.
+
+### Projects
+
+Projects represent a collection of Ansible playbooks. Most AWX users create Projects that import periodically from source control systems (such as git or subversion repositories).
+
+**Key Features:**
+- Import from SCM (Git, SVN, etc.)
+- Update on launch capability
+- Caching mechanism
+- Integration with Ansible playbooks
+
+The import is accomplished via an Ansible playbook included with AWX, which makes use of the various source control management modules in Ansible.
+
+### Inventories
+
+AWX manages Inventories, Groups, and Hosts, and provides a RESTful interface that maps to static and dynamic Ansible inventories.
+
+**Inventory Types:**
+- **Static Inventories**: Manually entered or imported
+- **Dynamic Inventories**: Synced from external sources
+- **Smart Inventories**: Host filter-based dynamic inventories
+
+Inventory data can be entered into AWX manually, but many users perform Inventory Syncs to import inventory data from a variety of external sources.
+
+### Job Templates
+
+A Job Template is a definition and set of parameters for running `ansible-playbook`. It defines metadata about a given playbook run:
+
+- A named identifier
+- An associated inventory to run against
+- The project and `.yml` playbook to run
+- Various options mapping directly to `ansible-playbook` arguments:
+  - `extra_vars`
+  - Verbosity level
+  - Forks
+  - Limit
+  - Tags
+  - And more...
+
+### Credentials
+
+AWX stores sensitive credential data which can be attached to `ansible-playbook` processes that it runs.
+
+**Credential Types:**
+- **SSH credentials**: Usernames, passwords, SSH keys and passphrases
+- **Vault passwords**: Ansible Vault decryption
+- **Cloud credentials**: AWS, Azure, GCP authentication
+- **SCM credentials**: Git, SVN authentication
+- **Custom credentials**: User-defined credential types
+
+Credentials use field-level encryption and can be injected as environment variables or extra variables.
+
+## Canonical Workflow
+
+A typical "Getting Started with AWX" workflow involves:
+
+1. **Create a Project** that imports playbooks from a remote git repository
+2. **Create or import an Inventory** which defines where the playbook(s) will run
+3. **Save Credentials** (optional) containing SSH authentication details
+4. **Create a Job Template** that specifies:
+   - Which Project and playbook to run
+   - Where to run it (Inventory)
+   - Any necessary Credentials
+5. **Launch the Job Template** and view the results
+
+## System Architecture
+
+### High-Level Components
+
+```
+┌──────────────────────────────────────┐
+│            Web UI / API                    │
+│     (Django REST Framework + React)      │
+└────────────────┬─────────────────────┘
+                 │
+                 │
+    ┌────────────┴─────────────┐
+    │    Task Manager System      │
+    │  (Scheduling & Dispatch)   │
+    └─────────┬────────────────┘
+             │
+    ┌────────┼─────────┐
+    │                   │
+    ▼                   ▼
+┌─────────┐       ┌───────────┐
+│ Dispatcher│       │  Receptor  │
+│  (Workers)│       │   Mesh    │
+└───┬──────┘       └───┬───────┘
+    │                   │
+    ▼                   ▼
+┌─────────────────────────────┐
+│    Ansible Runner           │
+│  (ansible-playbook exec)   │
+└─────────────────────────────┘
+
+       ┌────────────────────┐
+       │   PostgreSQL DB    │
+       └────────────────────┘
+
+       ┌────────────────────┐
+       │   Redis Cache     │
+       └────────────────────┘
+```
+
+### Component Details
+
+#### Web Layer
+
+**Technology Stack:**
+- **Backend**: Django + Django REST Framework
+- **Frontend**: React (ansible-ui)
+- **WebSockets**: For real-time job output streaming
+
+**Responsibilities:**
+- User authentication and authorization
+- RESTful API endpoints
+- Real-time event streaming
+- Static file serving
+
+#### Database
+
+**PostgreSQL** stores all AWX data:
+- User accounts and teams
+- Inventories, hosts, and groups
+- Projects and job templates
+- Job history and results
+- Credentials (encrypted)
+- System configuration
+
+#### Redis Cache
+
+**Redis** provides:
+- Session storage
+- Settings cache (for fast access)
+- Distributed locking
+- Callback event processing
+
+#### Task Manager System
+
+The Task Manager is responsible for:
+- Determining when tasks should run
+- Managing task dependencies
+- Checking capacity constraints
+- Scheduling tasks to appropriate nodes
+
+See the [Task Manager documentation](/development/task-manager) for detailed information.
+
+#### Dispatcher
+
+The Dispatcher manages background task execution:
+- Runs on every AWX node
+- Maintains a pool of worker processes
+- Consumes tasks from queues
+- Executes Python code for tasks
+
+See the [Dispatcher documentation](/development/dispatcher) for more details.
+
+#### Receptor Mesh
+
+**Receptor** provides mesh networking capabilities:
+- Connects AWX nodes in a cluster
+- Routes work to execution nodes
+- Provides secure, scalable communication
+- Supports hybrid and hop nodes
+
+## AWX's Interaction with Ansible
+
+AWX interacts with Ansible primarily when executing automation:
+
+### Job Execution Events
+
+1. **Job Template Launch**
+2. **Project Update**
+3. **Inventory Sync**
+4. **Ad Hoc Command**
+
+### Spawning Ansible Processes
+
+When a Job Template or Project Update runs:
+
+1. An actual `ansible-playbook` command is composed
+2. The process is spawned in a container/pod
+3. The process runs until completion or timeout
+4. Return code, `stdout`, and `stderr` are recorded
+
+**AWX relies on stability in:**
+- CLI arguments for `ansible-playbook` and `ansible-inventory`
+- Task execution behavior
+- Prompts (password, become, Vault)
+
+### Capturing Event Data
+
+AWX applies an Ansible callback plugin to all spawned processes:
+
+```python
+# Event flow
+Ansible Playbook Run
+  ↓
+Callback Plugin
+  ↓
+Event Data (JSON)
+  ↓
+Redis Queue
+  ↓
+Callback Receiver
+  ↓
+PostgreSQL Database
+  ↓
+WebSocket to UI
+```
+
+This callback plugin:
+- Captures and persists events to the database
+- Drives the "streaming" web UI
+- Relies on stability in plugin interface and event structure
+
+### Fact Caching
+
+AWX provides custom fact caching:
+
+1. Uses the `jsonfile` fact cache plugin
+2. After `ansible-playbook` exits, AWX consumes the cache
+3. Facts are persisted in the AWX database
+4. On subsequent runs, caches are restored to the filesystem
+
+### Environment-Based Configuration
+
+AWX injects credentials and configuration via environment variables:
+
+**Examples:**
+- `ANSIBLE_NET_*` - Network device authentication
+- `AWS_ACCESS_KEY_ID` - AWS credentials
+- `GCE_EMAIL` - Google Cloud credentials
+- `ANSIBLE_SSH_CONTROL_PATH` - SSH configuration
+
+AWX relies on stability in these configuration options for credential injection.
+
+## Node Types
+
+AWX supports different node types in a cluster:
+
+### Hybrid Nodes
+
+- Run both control and execution tasks
+- Handle web requests and run jobs
+- Default node type
+
+### Control Nodes
+
+- Run only control plane tasks
+- Handle web requests, API, task management
+- Do not execute jobs directly
+
+### Execution Nodes
+
+- Run only job execution tasks
+- Execute playbooks and ad hoc commands
+- Connected via Receptor mesh
+
+### Hop Nodes
+
+- Route traffic between nodes
+- Do not run control or execution tasks
+- Enable complex network topologies
+
+## Job Lifecycle
+
+Understanding the job lifecycle is crucial for debugging:
+
+| Status | Description |
+|--------|-------------|
+| **pending** | Job has been launched but:<br/>1. Hasn't been seen by scheduler<br/>2. Is blocked by another task<br/>3. Not enough capacity |
+| **waiting** | Job submitted to dispatcher via pg_notify |
+| **running** | Job is running on an AWX node |
+| **successful** | Job finished with `ansible-playbook` return code 0 |
+| **failed** | Job finished with `ansible-playbook` return code ≠ 0 |
+| **error** | System failure (not playbook failure) |
+| **canceled** | Job was manually canceled |
+
+## Clustering Architecture
+
+### Horizontal Scaling
+
+AWX supports clustering for:
+- **High availability**: No single point of failure
+- **Load distribution**: Spread work across nodes
+- **Capacity scaling**: Add nodes to increase capacity
+
+### Cluster Communication
+
+**Database**: Shared state and coordination
+- All nodes connect to same PostgreSQL
+- Distributed locking via database
+
+**Redis**: Fast cache and event processing
+- Each node runs local Redis
+- Used for callback events and settings cache
+
+**Receptor**: Mesh networking
+- Secure node-to-node communication
+- Work routing to execution nodes
+- Resilient to network partitions
+
+### Heartbeat and Capacity
+
+Each node periodically:
+1. Updates its heartbeat timestamp
+2. Calculates and reports capacity
+3. Checks health of peer nodes
+4. Reaps orphaned jobs from dead nodes
+
+## Security Architecture
+
+### Credential Encryption
+
+Credentials are encrypted at rest:
+- Field-level encryption in database
+- Encryption keys managed securely
+- Credentials injected at job runtime
+
+### Role-Based Access Control (RBAC)
+
+AWX implements comprehensive RBAC:
+- Users, Teams, and Organizations
+- Resource-level permissions
+- Role inheritance
+- Audit logging via Activity Stream
+
+### Network Security
+
+- HTTPS for web traffic
+- TLS for Receptor mesh
+- SSH key-based authentication for hosts
+- Support for credential vaults (HashiCorp, CyberArk)
+
+## Data Flow Example
+
+Here's what happens when you launch a Job Template:
+
+1. **User clicks "Launch" in UI**
+   - API receives POST request
+   - Creates Job record in database (status: pending)
+
+2. **Dependency Manager runs**
+   - Checks if project update needed
+   - Creates project update job if needed
+   - Links dependencies
+
+3. **Task Manager runs**
+   - Finds pending jobs
+   - Checks dependencies satisfied
+   - Checks capacity available
+   - Selects execution node
+   - Changes job status to waiting
+   - Publishes task to dispatcher
+
+4. **Dispatcher receives task**
+   - Worker process picks up task
+   - Imports task code (RunJob)
+   - Executes run() method
+
+5. **Job execution (via Ansible Runner)**
+   - Prepares ansible-playbook command
+   - Injects credentials and configuration
+   - Spawns ansible-playbook process
+   - Callback plugin streams events
+
+6. **Event processing**
+   - Events published to Redis
+   - Callback receiver consumes events
+   - Events saved to database
+   - WebSocket broadcasts to UI
+
+7. **Job completion**
+   - Process exits
+   - Final status recorded
+   - Cleanup tasks run
+   - Dependent jobs may start
+
+## Performance Considerations
+
+### Capacity Management
+
+- Each node has configurable capacity
+- Jobs consume capacity based on forks
+- Task manager respects capacity limits
+- One job always allowed per instance group
+
+### Database Optimization
+
+- Indexes on frequently queried fields
+- Periodic cleanup of old job data
+- Connection pooling (optional pgbouncer)
+
+### Caching Strategy
+
+- Settings cached in Redis
+- Fact caching for playbook runs
+- Project SCM caching
+
+## Next Steps
+
+- [Task Manager System](/development/task-manager)
+- [Dispatcher System](/development/dispatcher)
+- [Ansible Integration](/development/ansible-integration)
+- [Testing AWX](/development/testing)

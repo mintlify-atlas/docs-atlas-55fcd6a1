@@ -1,0 +1,536 @@
+---
+title: 'Job Templates'
+description: 'Manage AWX job templates via the API'
+---
+
+## Overview
+
+Job templates define parameters for running Ansible playbooks. They combine a project, playbook, inventory, and credentials into a reusable template that can be launched on-demand or scheduled.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/job_templates/` | List job templates |
+| POST | `/api/v2/job_templates/` | Create job template |
+| GET | `/api/v2/job_templates/{id}/` | Retrieve job template |
+| PATCH | `/api/v2/job_templates/{id}/` | Update job template |
+| DELETE | `/api/v2/job_templates/{id}/` | Delete job template |
+| POST | `/api/v2/job_templates/{id}/launch/` | Launch job |
+| POST | `/api/v2/job_templates/{id}/copy/` | Copy job template |
+
+## List Job Templates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Create Job Template
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/job_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Deploy Application",
+    "description": "Deploy app to production",
+    "job_type": "run",
+    "inventory": 3,
+    "project": 5,
+    "playbook": "site.yml",
+    "credentials": [7, 8],
+    "forks": 5,
+    "limit": "",
+    "verbosity": 0,
+    "extra_vars": "---\nenv: production",
+    "job_tags": "",
+    "force_handlers": false,
+    "skip_tags": "",
+    "start_at_task": "",
+    "timeout": 0,
+    "use_fact_cache": false,
+    "allow_simultaneous": false,
+    "diff_mode": false
+  }'
+```
+
+<ParamField body="name" type="string" required>
+  Job template name
+</ParamField>
+
+<ParamField body="description" type="string">
+  Job template description
+</ParamField>
+
+<ParamField body="job_type" type="string" default="run">
+  Job type: `run` or `check`
+</ParamField>
+
+<ParamField body="inventory" type="integer" required>
+  Inventory ID
+</ParamField>
+
+<ParamField body="project" type="integer" required>
+  Project ID
+</ParamField>
+
+<ParamField body="playbook" type="string" required>
+  Playbook filename from the project
+</ParamField>
+
+<ParamField body="credentials" type="array">
+  Array of credential IDs
+</ParamField>
+
+<ParamField body="forks" type="integer" default="0">
+  Number of parallel processes (0 = use Ansible default)
+</ParamField>
+
+<ParamField body="limit" type="string">
+  Host pattern to limit job execution
+</ParamField>
+
+<ParamField body="verbosity" type="integer" default="0">
+  Ansible verbosity: 0-5 (0=normal, 5=connection debug)
+</ParamField>
+
+<ParamField body="extra_vars" type="string">
+  Extra variables in YAML or JSON
+</ParamField>
+
+<ParamField body="job_tags" type="string">
+  Comma-separated Ansible tags to run
+</ParamField>
+
+<ParamField body="skip_tags" type="string">
+  Comma-separated Ansible tags to skip
+</ParamField>
+
+<ParamField body="start_at_task" type="string">
+  Task name to start at
+</ParamField>
+
+<ParamField body="timeout" type="integer" default="0">
+  Job timeout in seconds (0 = no timeout)
+</ParamField>
+
+<ParamField body="diff_mode" type="boolean" default="false">
+  Show differences when files are changed
+</ParamField>
+
+<ParamField body="allow_simultaneous" type="boolean" default="false">
+  Allow multiple jobs from this template to run simultaneously
+</ParamField>
+
+<ParamField body="use_fact_cache" type="boolean" default="false">
+  Use Ansible fact cache
+</ParamField>
+
+<ParamField body="become_enabled" type="boolean" default="false">
+  Enable privilege escalation
+</ParamField>
+
+<ParamField body="host_config_key" type="string">
+  Enable provisioning callback with this key
+</ParamField>
+
+<ParamField body="ask_*_on_launch" type="boolean">
+  Prompt for field at launch:
+  - `ask_inventory_on_launch`
+  - `ask_credential_on_launch`
+  - `ask_limit_on_launch`
+  - `ask_tags_on_launch`
+  - `ask_skip_tags_on_launch`
+  - `ask_job_type_on_launch`
+  - `ask_verbosity_on_launch`
+  - `ask_variables_on_launch`
+  - `ask_scm_branch_on_launch`
+  - `ask_diff_mode_on_launch`
+  - `ask_execution_environment_on_launch`
+  - `ask_labels_on_launch`
+  - `ask_forks_on_launch`
+  - `ask_job_slice_count_on_launch`
+  - `ask_timeout_on_launch`
+  - `ask_instance_groups_on_launch`
+</ParamField>
+
+<ParamField body="survey_enabled" type="boolean" default="false">
+  Enable survey
+</ParamField>
+
+<ParamField body="webhook_service" type="string">
+  Enable webhook: `github` or `gitlab`
+</ParamField>
+
+<ParamField body="webhook_credential" type="integer">
+  Webhook credential ID
+</ParamField>
+
+<ParamField body="execution_environment" type="integer">
+  Execution environment ID
+</ParamField>
+
+<ParamField body="labels" type="array">
+  Array of label IDs
+</ParamField>
+
+<ParamField body="instance_groups" type="array">
+  Array of instance group IDs
+</ParamField>
+
+<ParamField body="job_slice_count" type="integer" default="1">
+  Number of job slices for distributed execution
+</ParamField>
+
+## Retrieve Job Template
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Response includes all fields plus:
+
+<ResponseField name="status" type="string">
+  Template status: `new`, `pending`, `waiting`, `running`, `successful`, `failed`, `error`, `canceled`, `never updated`, `ok`, `missing`
+</ResponseField>
+
+<ResponseField name="last_job_run" type="string">
+  Last job execution timestamp
+</ResponseField>
+
+<ResponseField name="last_job_failed" type="boolean">
+  Whether last job failed
+</ResponseField>
+
+<ResponseField name="next_job_run" type="string">
+  Next scheduled run
+</ResponseField>
+
+<ResponseField name="related" type="object">
+  Links to related resources:
+  - `organization` - Parent organization
+  - `inventory` - Job inventory
+  - `project` - Source project
+  - `execution_environment` - Execution environment
+  - `credentials` - Attached credentials
+  - `labels` - Associated labels
+  - `jobs` - Job history
+  - `schedules` - Execution schedules
+  - `launch` - Launch endpoint
+  - `webhook_key` - Webhook configuration
+  - `webhook_receiver` - Webhook URL
+  - `activity_stream` - Activity log
+  - `notification_templates_*` - Notification templates
+  - `survey_spec` - Survey specification
+  - `access_list` - Access list
+  - `object_roles` - Available roles
+  - `instance_groups` - Instance groups
+  - `slice_workflow_jobs` - Slice workflow jobs
+  - `copy` - Copy endpoint
+</ResponseField>
+
+## Update Job Template
+
+```bash
+curl -X PATCH \
+  https://awx.example.com/api/v2/job_templates/10/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Updated description",
+    "extra_vars": "---\nenv: staging\ndebug: true"
+  }'
+```
+
+## Delete Job Template
+
+```bash
+curl -X DELETE \
+  https://awx.example.com/api/v2/job_templates/10/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Launch Job
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/job_templates/10/launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "limit": "web01",
+    "extra_vars": "deploy_version: v2.0"
+  }'
+```
+
+Promptable fields can be overridden at launch if `ask_*_on_launch` is enabled.
+
+Returns a job object with status URL.
+
+## Survey Specification
+
+### Get Survey
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/survey_spec/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Create/Update Survey
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/job_templates/10/survey_spec/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Deployment Survey",
+    "description": "Deployment parameters",
+    "spec": [
+      {
+        "question_name": "Environment",
+        "question_description": "Target environment",
+        "required": true,
+        "type": "multiplechoice",
+        "variable": "deploy_env",
+        "choices": ["dev", "staging", "production"],
+        "default": "staging"
+      },
+      {
+        "question_name": "Version",
+        "question_description": "Application version",
+        "required": true,
+        "type": "text",
+        "variable": "app_version",
+        "min": 1,
+        "max": 20
+      }
+    ]
+  }'
+```
+
+### Delete Survey
+
+```bash
+curl -X DELETE \
+  https://awx.example.com/api/v2/job_templates/10/survey_spec/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Jobs
+
+List jobs created from this template:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/jobs/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Schedules
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/schedules/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Labels
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/labels/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Instance Groups
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/instance_groups/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Credentials
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/credentials/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Notifications
+
+```bash
+# Started notifications
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/notification_templates_started/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Success notifications
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/notification_templates_success/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Error notifications
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/notification_templates_error/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Webhooks
+
+### Get Webhook Key
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/webhook_key/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Regenerate Webhook Key
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/job_templates/10/webhook_key/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Provisioning Callback
+
+Enable callback to allow hosts to trigger their own configuration:
+
+1. Set `host_config_key` on the job template
+2. Configure the callback URL on the host
+
+```bash
+# Callback URL format
+curl -X POST \
+  "https://awx.example.com/api/v2/job_templates/10/callback/" \
+  -d "host_config_key=SECRET_KEY"
+```
+
+## Object Roles
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/object_roles/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Available roles:
+- **admin_role** - Full template administration
+- **execute_role** - Launch jobs from template
+- **read_role** - View template details
+
+## Copy Job Template
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/job_templates/10/copy/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Deploy Application Copy"
+  }'
+```
+
+## Filtering
+
+```bash
+# By name
+?name__icontains=deploy
+
+# By project
+?project=5
+
+# By inventory
+?inventory=3
+
+# By playbook
+?playbook=site.yml
+
+# Failed jobs
+?last_job_failed=true
+```
+
+## Complete Example
+
+```python
+import requests
+import json
+import time
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Create job template
+template_data = {
+    "name": "Deploy Web App",
+    "description": "Deploy web application",
+    "job_type": "run",
+    "inventory": 3,
+    "project": 5,
+    "playbook": "deploy.yml",
+    "credentials": [7],
+    "extra_vars": "---\napp_version: latest",
+    "ask_limit_on_launch": True,
+    "ask_variables_on_launch": True
+}
+
+response = requests.post(
+    f"{base_url}/job_templates/",
+    headers=headers,
+    data=json.dumps(template_data)
+)
+
+if response.status_code == 201:
+    template = response.json()
+    template_id = template['id']
+    print(f"Created job template {template_id}")
+    
+    # Launch job
+    launch_data = {
+        "limit": "web01",
+        "extra_vars": "app_version: v2.0.1"
+    }
+    
+    launch_response = requests.post(
+        f"{base_url}/job_templates/{template_id}/launch/",
+        headers=headers,
+        data=json.dumps(launch_data)
+    )
+    
+    if launch_response.status_code in [201, 202]:
+        job = launch_response.json()
+        job_id = job['id']
+        print(f"Launched job {job_id}")
+        
+        # Monitor job
+        while True:
+            job_status = requests.get(
+                f"{base_url}/jobs/{job_id}/",
+                headers=headers
+            ).json()
+            
+            status = job_status['status']
+            print(f"Job status: {status}")
+            
+            if status in ['successful', 'failed', 'error', 'canceled']:
+                break
+            
+            time.sleep(3)
+else:
+    print(f"Error: {response.status_code}")
+    print(response.json())
+```

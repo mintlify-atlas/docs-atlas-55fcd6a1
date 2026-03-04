@@ -1,0 +1,264 @@
+---
+title: Workflows
+description: Build complex automation workflows with conditional logic and branching
+icon: diagram-project
+---
+
+Workflows are structured compositions of AWX job resources that enable you to orchestrate complex automation sequences with conditional logic, branching, and error handling.
+
+## Overview
+
+A workflow's purpose is to trigger other jobs in specific orders to achieve certain goals, such as tracking the full set of jobs that were part of a release process as a single unit. Each workflow has an associated tree-graph composed of multiple nodes.
+
+### Workflow Components
+
+**Workflow Nodes** contain one of the following template types:
+- Job templates
+- Inventory updates
+- Project updates
+- Approval templates
+- Workflow job templates (nested workflows)
+
+Each node can override the associated job template resources (credentials, inventory, etc.) if defined.
+
+## Creating Workflows
+
+<Steps>
+  <Step title="Create Workflow Job Template">
+    Like other job resources, workflow jobs are created from workflow job templates. The API exposes common fields similar to job templates:
+    - Labels
+    - Schedules
+    - Notification templates
+    - Extra variables
+    - Survey specifications
+  </Step>
+
+  <Step title="Add Workflow Nodes">
+    Access workflow nodes via the `workflow_nodes` related field. Create nodes under:
+    ```
+    /workflow_job_templates/<id>/workflow_nodes/
+    ```
+    Or directly under:
+    ```
+    /workflow_job_template_nodes/
+    ```
+  </Step>
+
+  <Step title="Define Node Relationships">
+    Connect nodes using three relationship types:
+    - `success_nodes` - Triggered when parent job succeeds
+    - `failure_nodes` - Triggered when parent job fails
+    - `always_nodes` - Triggered regardless of parent job status
+  </Step>
+</Steps>
+
+## Workflow Permissions
+
+<Note>
+By default, organization administrators have full control over all workflow job templates under the same organization. They share these abilities with users who have the `workflow_admin_role`.
+</Note>
+
+Permissions can be further delegated via workflow job template roles.
+
+## Node Configuration
+
+### Node Identifiers
+
+Workflow nodes have an `identifier` field that enables idempotent CRUD actions:
+- Functions like the `name` field for other resources
+- If not provided, the server assigns a random UUID4 value
+- Workflow job nodes spawned from a template node share the same `identifier`
+- Enables tracking which job nodes correspond to which template nodes
+
+### Launch Configuration
+
+Workflow job templates can contain launch configuration items:
+
+<CardGroup cols={2}>
+  <Card title="extra_vars" icon="code">
+    Extra variables with optional survey specifications
+  </Card>
+  <Card title="inventory" icon="server">
+    Override default inventory
+  </Card>
+  <Card title="limit" icon="filter">
+    Limit hosts for execution
+  </Card>
+  <Card title="scm_branch" icon="code-branch">
+    Specify source control branch
+  </Card>
+</CardGroup>
+
+### Prompt Precedence
+
+When a workflow job template is launched:
+1. Workflow job is created with user-provided values (if prompted)
+2. A workflow job node is created for each template node
+3. If both workflow job and node specify the same prompt, the workflow job takes precedence
+4. If the referenced job template doesn't have the prompting field enabled (e.g., `ask_inventory_on_launch`), the prompt is ignored
+
+## Advanced Features
+
+### Nested Workflows
+
+A workflow can be added as a node in another workflow:
+- The child workflow is the `unified_job_template` that the node references
+- Parent workflow resumes when child workflow finishes
+- Branching decisions based on child workflow status
+
+<Warning>
+If spawning a workflow would result in recursion, the child workflow will be marked as failed with a message explaining that recursion was detected. This prevents saturation of the task system.
+</Warning>
+
+### Approval Nodes
+
+Workflow approval nodes enable human decision points within workflows.
+
+**Who Can Approve:**
+- Superusers
+- Workflow Admins
+- Organization Admins
+- Users explicitly assigned the "approver" role
+
+**Who Can Create Approval Nodes:**
+- Superusers
+- Org Admins of the connected organization
+- Workflow Admins in the connected organization
+- Users assigned as admins to the specific workflow
+
+**Timeout Configuration:**
+Set a timeout (in minutes and seconds) for each approval node. Fields default to `0` for no expiration.
+
+### Artifacts
+
+Workflows support passing data between jobs using Ansible's `set_stats` module.
+
+```yaml
+- name: Register facts for downstream jobs
+  set_stats:
+    data:
+      build_version: "1.2.3"
+      deployment_status: "ready"
+```
+
+<Note>
+Artifacts from parent nodes are available to child nodes. If both a parent and grandparent set the same artifact, the parent's value overwrites the grandparent's value.
+</Note>
+
+## Workflow Execution
+
+### Launch Process
+
+<Steps>
+  <Step title="Initiate Workflow">
+    POST to `/workflow_job_templates/<id>/launch/` or trigger via schedule
+  </Step>
+
+  <Step title="Create Job Nodes">
+    Workflow job template creates a workflow job, and all template nodes create job nodes
+  </Step>
+
+  <Step title="Execute Root Nodes">
+    All root nodes (nodes with no incoming connections) populate with job resources and start running
+  </Step>
+
+  <Step title="Follow Decision Trees">
+    Each decision tree follows its route to completion based on success/failure paths
+  </Step>
+</Steps>
+
+### Job Status Handling
+
+Spawned job resources can end with the following statuses:
+- **Success** - Triggers success nodes
+- **Failure** - Triggers failure nodes
+- **Error** - Treated as failure
+- **Canceled** - Treated as failure
+
+<Warning>
+If the unified job template of a node is null (deleted or user lacks permissions), the node is treated as 'failed' and failure paths execute.
+</Warning>
+
+### Workflow Cancellation
+
+When a workflow job is canceled:
+- All spawned job resources are canceled (if cancellation is allowed)
+- Following paths stop executing
+- Deletion of spawned job resources is blocked while the workflow is executing
+
+### Overall Status
+
+A workflow job is marked as **failed** if:
+- A spawned job fails without a failure handler (no `failure_nodes` or `always_nodes` link)
+- A spawned job is canceled without error handling
+
+A workflow job is marked as **successful** if:
+- All job failures have error handling paths
+
+## Notifications
+
+Workflow job templates can be associated with notification templates. Notification bodies contain:
+- Status of the workflow itself
+- Status of all spawned jobs
+
+```
+Workflow job summary:
+
+- node #141 spawns no job.
+- node #139 spawns job #212, "foo", which finished with status successful.
+- node #140 spawns job #213, "bar", which finished with status failed.
+```
+
+## Simultaneous Runs
+
+Workflows support simultaneous job runs controlled by the `allow_simultaneous` field:
+- Disabled by default
+- Enable carefully - performance boost only manifests when a large portion of contained jobs allow simultaneous runs
+- Otherwise, expect long-running workflows due to jobs in pending state
+
+## Copy and Relaunch
+
+### Copying Workflows
+
+POST to `/workflow_job_templates/<id>/copy/` to create a copy with:
+- Identical fields (description, `extra_vars`, survey fields)
+- Copied workflow nodes and topology
+- Name appended with copy indicator (e.g., `'copy_from_name@10:30:00 am'`)
+- Null values for resources the user lacks access to
+- Schedules and notification templates NOT copied
+
+<Note>
+A workflow job template can be copied if the user has permission to add an equivalent workflow job template.
+</Note>
+
+### Relaunching Workflows
+
+POST to `/workflow_jobs/<id>/relaunch/` to relaunch:
+- Original workflow job's prompts re-applied to the template
+- Creates new workflow job
+- New job is triggered to run
+- Survey password-type answers are redacted
+
+## DAG Structure
+
+Workflows enforce a Directed Acyclic Graph (DAG) structure:
+- Connect nodes via `/workflow_job_template_nodes/<id>/*_nodes/` endpoints
+- `*` can be `success`, `failure`, or `always`
+- Cycle restriction is enforced - cycles are not allowed
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Error Handling" icon="shield-check">
+    Always provide failure paths for critical jobs to prevent workflow failures
+  </Card>
+  <Card title="Node Naming" icon="tag">
+    Use meaningful identifiers for workflow nodes to track job execution
+  </Card>
+  <Card title="Artifact Usage" icon="box">
+    Use artifacts to pass data between jobs instead of external storage
+  </Card>
+  <Card title="Testing" icon="flask">
+    Test workflows with non-trivial topologies including multiple decision trees
+  </Card>
+</CardGroup>

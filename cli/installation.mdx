@@ -1,0 +1,177 @@
+---
+title: CLI Installation
+description: Install and set up the AWX command-line interface
+---
+
+The AWX CLI (`awx`) is the official command-line interface for Ansible AWX, providing programmatic access to AWX resources through a simple and intuitive command structure.
+
+## Overview
+
+The `awxkit` package provides:
+- **awx** - The main CLI tool for interacting with AWX/Ansible Automation Platform
+- **akit** - An interactive Python session with awxkit loaded
+
+The CLI is built on top of the `awxkit` Python library and provides HTTP OPTIONS-based resource discovery and action mapping.
+
+## Requirements
+
+- **Python**: 3.11 or higher (Python 3.11 and 3.12 are officially supported)
+- **Operating System**: Linux or macOS
+- **Network Access**: Connection to an AWX or Ansible Automation Platform instance
+
+## Installation Methods
+
+### Install from PyPI
+
+The recommended way to install the AWX CLI is via pip:
+
+```bash
+pip install awxkit
+```
+
+### Install from GitHub
+
+To install a specific version matching your AWX deployment:
+
+```bash
+pip install "git+https://github.com/ansible/awx.git@$VERSION#egg=awxkit&subdirectory=awxkit"
+```
+
+Replace `$VERSION` with your AWX version (e.g., `23.4.0`). To see all available releases, visit: https://github.com/ansible/awx/releases
+
+### Install from Source
+
+For development or customization:
+
+```bash
+git clone https://github.com/ansible/awx.git
+cd awx/awxkit
+pip install -e .
+```
+
+## Core Dependencies
+
+The following dependencies are automatically installed:
+
+- **PyYAML** - YAML parsing support
+- **requests** - HTTP client library
+- **setuptools** - Python package utilities
+
+## Optional Dependencies
+
+### Output Formatting
+
+For advanced JSON output filtering with jq:
+
+```bash
+pip install awxkit[formatting]
+```
+
+<Note>
+  The jq extra requires `libtool` and other build dependencies on some platforms. See [jq PyPI page](https://pypi.org/project/jq/) for platform-specific requirements.
+</Note>
+
+### WebSocket Support
+
+For real-time job output monitoring via WebSockets:
+
+```bash
+pip install awxkit[websockets]
+```
+
+### Cryptography
+
+For additional cryptographic functionality:
+
+```bash
+pip install awxkit[crypto]
+```
+
+### Install All Optional Features
+
+```bash
+pip install awxkit[formatting,websockets,crypto]
+```
+
+## Verify Installation
+
+After installation, verify the CLI is available:
+
+```bash
+awx --version
+```
+
+This should display the installed version of awxkit.
+
+## Platform-Specific Notes
+
+### Linux
+
+On most Linux distributions, you can install directly with pip. Some distributions may require:
+
+```bash
+sudo apt-get install python3-pip  # Debian/Ubuntu
+sudo yum install python3-pip      # RHEL/CentOS
+```
+
+### macOS
+
+On macOS, use Homebrew's Python or the system Python:
+
+```bash
+brew install python3
+pip3 install awxkit
+```
+
+### Virtual Environments
+
+It's recommended to use virtual environments to avoid conflicts:
+
+```bash
+python3 -m venv awx-env
+source awx-env/bin/activate  # On Windows: awx-env\Scripts\activate
+pip install awxkit
+```
+
+## Ansible Automation Platform Considerations
+
+When using AWX CLI with Red Hat Ansible Automation Platform 2.5 and later, you must set an environment variable:
+
+```bash
+export AWXKIT_API_BASE_PATH=/api/controller/
+```
+
+Add this to your shell profile (`~/.bashrc`, `~/.zshrc`) to make it persistent:
+
+```bash
+echo 'export AWXKIT_API_BASE_PATH=/api/controller/' >> ~/.bashrc
+```
+
+## Upgrade AWX CLI
+
+To upgrade to the latest version:
+
+```bash
+pip install --upgrade awxkit
+```
+
+To upgrade to a specific version:
+
+```bash
+pip install awxkit==23.4.0
+```
+
+## Uninstall
+
+To remove the AWX CLI:
+
+```bash
+pip uninstall awxkit
+```
+
+## Next Steps
+
+After installation, proceed to:
+- [Configuration](/cli/configuration) - Set up authentication and connection settings
+- [Usage](/cli/usage) - Learn basic CLI commands and patterns
+- [Commands](/cli/commands) - Explore available resources and actions

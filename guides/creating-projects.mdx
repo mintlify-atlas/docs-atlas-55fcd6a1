@@ -1,0 +1,591 @@
+---
+title: Creating Projects
+description: Learn how to create and configure AWX projects to manage your Ansible playbooks and roles
+---
+
+Projects in AWX represent a logical collection of Ansible playbooks, sourced from version control systems (Git, Subversion) or manually placed on the AWX server.
+
+## Understanding Projects
+
+A **Project** in AWX:
+
+- Contains Ansible playbooks, roles, and related files
+- Syncs content from SCM (Source Control Management) systems
+- Can be assigned to an organization
+- Requires appropriate credentials for private repositories
+- Supports multiple SCM types: Git, Subversion, Red Hat Insights, and Remote Archive
+
+### Project Types
+
+<CardGroup cols={2}>
+  <Card title="SCM-Based" icon="git-alt">
+    Projects synced from version control (Git, SVN) - recommended approach
+  </Card>
+  
+  <Card title="Manual" icon="folder">
+    Playbooks manually placed in the project directory on the AWX server
+  </Card>
+  
+  <Card title="Insights" icon="lightbulb">
+    Projects that sync from Red Hat Insights
+  </Card>
+  
+  <Card title="Remote Archive" icon="file-zipper">
+    Projects from remote archive files (tar, zip)
+  </Card>
+</CardGroup>
+
+## Creating a Git Project
+
+<Steps>
+
+<Step title="Prepare Your Repository">
+  Ensure your Git repository contains:
+  - Ansible playbooks (`.yml` or `.yaml` files)
+  - Optional: `roles/` directory
+  - Optional: `group_vars/` and `host_vars/`
+  - Optional: `collections/requirements.yml`
+  - Optional: `roles/requirements.yml`
+
+  Example repository structure:
+  ```
+  my-ansible-project/
+  ├── playbooks/
+  │   ├── site.yml
+  │   ├── deploy.yml
+  │   └── configure.yml
+  ├── roles/
+  │   └── webserver/
+  ├── inventory/
+  │   └── hosts.yml
+  └── collections/
+      └── requirements.yml
+  ```
+</Step>
+
+<Step title="Create via Web UI">
+  1. Navigate to **Projects** in the left sidebar
+  2. Click **Add**
+  3. Fill in the project details:
+     - **Name**: Descriptive project name
+     - **Organization**: Select the organization
+     - **Default Execution Environment**: Optional EE
+     - **Source Control Type**: Select "Git"
+     - **Source Control URL**: Your repository URL
+     - **Source Control Branch/Tag/Commit**: Branch name (default: master/main)
+     - **Source Control Credential**: Select if private repo
+  4. Configure SCM options:
+     - **Clean**: Discard local changes before sync
+     - **Delete**: Remove project before sync
+     - **Track submodules**: Track Git submodules
+     - **Update on Launch**: Update before running jobs
+  5. Click **Save**
+</Step>
+
+<Step title="Create via API">
+  ```bash
+  curl -X POST https://awx.example.com/api/v2/projects/ \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "Infrastructure Playbooks",
+      "description": "Core infrastructure automation playbooks",
+      "organization": 1,
+      "scm_type": "git",
+      "scm_url": "https://github.com/example/ansible-playbooks.git",
+      "scm_branch": "main",
+      "scm_clean": true,
+      "scm_update_on_launch": true,
+      "scm_update_cache_timeout": 300
+    }'
+  ```
+</Step>
+
+<Step title="Create via Ansible">
+  ```yaml
+  - name: Create AWX project
+    awx.awx.project:
+      name: Infrastructure Playbooks
+      description: Core infrastructure automation playbooks
+      organization: Engineering
+      scm_type: git
+      scm_url: https://github.com/example/ansible-playbooks.git
+      scm_branch: main
+      scm_clean: true
+      scm_update_on_launch: true
+      scm_update_cache_timeout: 300
+      state: present
+      controller_host: awx.example.com
+      controller_oauthtoken: "{{ awx_token }}"
+  ```
+</Step>
+
+</Steps>
+
+## Project Configuration Options
+
+### SCM Update Behavior
+
+<Tabs>
+  <Tab title="Update on Launch">
+    **scm_update_on_launch**: When enabled, the project syncs from SCM before each job run.
+
+    ```yaml
+    scm_update_on_launch: true
+    scm_update_cache_timeout: 300  # seconds
+    ```
+
+    Use when:
+    - Playbooks change frequently
+    - You want the latest code for every job
+    - CI/CD pipelines push regular updates
+  </Tab>
+
+  <Tab title="Cache Timeout">
+    **scm_update_cache_timeout**: Seconds before considering cached update stale.
+
+    ```yaml
+    scm_update_cache_timeout: 86400  # 24 hours
+    ```
+
+    - Set to 0 to always update
+    - Higher values reduce SCM load
+    - Lower values ensure fresher content
+  </Tab>
+
+  <Tab title="Allow Override">
+    **allow_override**: Permits job templates to override the SCM branch.
+
+    ```yaml
+    allow_override: true
+    ```
+
+    Enables testing different branches without creating new projects.
+  </Tab>
+</Tabs>
+
+### SCM Authentication
+
+<Steps>
+
+<Step title="Create SCM Credential">
+  For private repositories, create an SCM credential:
+
+  ```yaml
+  - name: Create Git credential
+    awx.awx.credential:
+      name: GitHub Personal Access Token
+      organization: Engineering
+      credential_type: Source Control
+      inputs:
+        username: git
+        password: "{{ github_token }}"
+      state: present
+  ```
+</Step>
+
+<Step title="Assign to Project">
+  ```yaml
+  - name: Create project with credential
+    awx.awx.project:
+      name: Private Repo Project
+      organization: Engineering
+      scm_type: git
+      scm_url: https://github.com/example/private-repo.git
+      credential: GitHub Personal Access Token
+      state: present
+  ```
+</Step>
+
+</Steps>
+
+### Supported Credential Types
+
+- **Username/Password**: Basic authentication
+- **SSH Key**: For SSH URLs (`git@github.com:...`)
+- **Personal Access Token**: GitHub, GitLab tokens
+
+## Working with Git Branches
+
+### Specifying Branches
+
+```yaml
+# Use specific branch
+scm_branch: develop
+
+# Use tag
+scm_branch: v1.2.3
+
+# Use commit SHA
+scm_branch: abc123def456
+```
+
+### Branch Override in Job Templates
+
+When `allow_override` is enabled:
+
+```yaml
+- name: Create job template with branch override
+  awx.awx.job_template:
+    name: Deploy from Feature Branch
+    project: Infrastructure Playbooks
+    playbook: deploy.yml
+    ask_scm_branch_on_launch: true
+    state: present
+```
+
+Launch with specific branch:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/job_templates/1/launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"scm_branch": "feature/new-deployment"}'
+```
+
+## Advanced SCM Options
+
+### Git Refspec
+
+Fetch additional references beyond the default branch:
+
+```yaml
+scm_refspec: '+refs/pull/*:refs/remotes/origin/pull/*'
+scm_branch: 'pull/42/head'
+```
+
+Useful for:
+- Testing pull requests
+- Accessing non-standard refs
+- Fetching multiple branches
+
+### Git Submodules
+
+Track Git submodules in your project:
+
+```yaml
+scm_track_submodules: true
+```
+
+### Clean and Delete Options
+
+<Tabs>
+  <Tab title="Clean">
+    ```yaml
+    scm_clean: true
+    ```
+    Discards local modifications (equivalent to `git clean -fdx`)
+  </Tab>
+
+  <Tab title="Delete on Update">
+    ```yaml
+    scm_delete_on_update: true
+    ```
+    Deletes the project directory before syncing (fresh clone each time)
+  </Tab>
+</Tabs>
+
+## Manual Projects
+
+For manual projects without SCM:
+
+<Steps>
+
+<Step title="Create Manual Project">
+  ```yaml
+  - name: Create manual project
+    awx.awx.project:
+      name: Manual Playbooks
+      organization: Engineering
+      scm_type: ""
+      local_path: manual_project
+      state: present
+  ```
+</Step>
+
+<Step title="Place Playbooks on Server">
+  Copy playbooks to the AWX server:
+
+  ```bash
+  # On AWX server
+  sudo mkdir -p /var/lib/awx/projects/manual_project
+  sudo cp -r /path/to/playbooks/* /var/lib/awx/projects/manual_project/
+  sudo chown -R awx:awx /var/lib/awx/projects/manual_project
+  ```
+</Step>
+
+</Steps>
+
+<Warning>
+  Manual projects are not recommended for production. Use SCM-based projects for better version control and auditability.
+</Warning>
+
+## Project Signing and Verification
+
+AWX supports content verification using GPG signatures:
+
+```yaml
+- name: Create signing credential
+  awx.awx.credential:
+    name: GPG Signing Key
+    credential_type: GPG Public Key
+    inputs:
+      gpg_public_key: "{{ lookup('file', 'pubkey.asc') }}"
+    state: present
+
+- name: Create verified project
+  awx.awx.project:
+    name: Signed Playbooks
+    organization: Engineering
+    scm_type: git
+    scm_url: https://github.com/example/signed-repo.git
+    signature_validation_credential: GPG Signing Key
+    state: present
+```
+
+## Updating Projects
+
+### Manual Update
+
+<Tabs>
+  <Tab title="Web UI">
+    1. Navigate to **Projects**
+    2. Click the sync icon next to the project
+    3. Monitor the update status
+  </Tab>
+
+  <Tab title="API">
+    ```bash
+    # Trigger project update
+    curl -X POST https://awx.example.com/api/v2/projects/1/update/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+
+    # Check update status
+    curl https://awx.example.com/api/v2/project_updates/123/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Tab>
+
+  <Tab title="Ansible">
+    ```yaml
+    - name: Update project
+      awx.awx.project_update:
+        project: Infrastructure Playbooks
+        wait: true
+    ```
+  </Tab>
+</Tabs>
+
+### Scheduled Updates
+
+Schedule regular project syncs:
+
+```yaml
+- name: Schedule nightly project update
+  awx.awx.schedule:
+    name: Nightly Sync
+    unified_job_template: Infrastructure Playbooks
+    rrule: "DTSTART:20260101T020000Z RRULE:FREQ=DAILY;INTERVAL=1"
+    state: present
+```
+
+## Viewing Project Playbooks
+
+List available playbooks in a project:
+
+```bash
+# Via API
+curl https://awx.example.com/api/v2/projects/1/playbooks/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Response:
+```json
+[
+  "site.yml",
+  "playbooks/deploy.yml",
+  "playbooks/configure.yml",
+  "playbooks/backup.yml"
+]
+```
+
+## Collections and Roles
+
+AWX automatically installs collections and roles defined in your project:
+
+### Collections
+
+Create `collections/requirements.yml`:
+
+```yaml
+collections:
+  - name: community.general
+    version: ">=3.0.0"
+  - name: ansible.posix
+  - name: amazon.aws
+    version: 5.1.0
+```
+
+### Roles
+
+Create `roles/requirements.yml`:
+
+```yaml
+roles:
+  - src: geerlingguy.apache
+    version: 3.1.4
+  - src: geerlingguy.mysql
+  - src: https://github.com/example/custom-role.git
+    name: custom_role
+    version: main
+```
+
+<Note>
+  Collections and roles are installed during project updates and are cached for subsequent job runs.
+</Note>
+
+## Execution Environments
+
+Assign a default execution environment to the project:
+
+```yaml
+- name: Create project with execution environment
+  awx.awx.project:
+    name: Infrastructure Playbooks
+    organization: Engineering
+    scm_type: git
+    scm_url: https://github.com/example/playbooks.git
+    default_environment: Custom EE
+    state: present
+```
+
+This EE will be used by default for all job templates using this project.
+
+## Project Permissions
+
+Grant users and teams access to projects:
+
+```yaml
+# Grant team use access
+- name: Grant project use permission
+  awx.awx.role:
+    team: DevOps Team
+    project: Infrastructure Playbooks
+    role: use
+    state: present
+
+# Grant user admin access
+- name: Grant project admin permission
+  awx.awx.role:
+    user: john.doe
+    project: Infrastructure Playbooks
+    role: admin
+    state: present
+```
+
+Project roles:
+- **Admin**: Full control over the project
+- **Use**: Use project in job templates
+- **Update**: Trigger project updates
+- **Read**: View project details
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Project update fails with authentication error">
+    Check your SCM credential:
+    
+    ```bash
+    # Test Git access manually
+    git ls-remote https://github.com/example/repo.git
+    
+    # For SSH URLs
+    ssh -T git@github.com
+    ```
+    
+    - Verify credential username and password/token
+    - For SSH, ensure the key is correct
+    - Check repository permissions
+  </Accordion>
+
+  <Accordion title="Playbooks not appearing in project">
+    Ensure:
+    - Files have `.yml` or `.yaml` extensions
+    - Files are valid Ansible playbooks (start with `---` and contain plays)
+    - Project update completed successfully
+    - Check project update logs for errors
+
+    ```bash
+    # View project update output
+    curl https://awx.example.com/api/v2/project_updates/123/stdout/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Accordion>
+
+  <Accordion title="Collections or roles not installing">
+    Check:
+    - Requirements files are named correctly (`requirements.yml`)
+    - Requirements files are valid YAML
+    - AWX has internet access (or access to your Galaxy server)
+    - Review project update logs
+
+    ```yaml
+    # Test requirements file locally
+    ansible-galaxy collection install -r collections/requirements.yml
+    ansible-galaxy role install -r roles/requirements.yml
+    ```
+  </Accordion>
+
+  <Accordion title="Project stuck in 'pending' status">
+    Check:
+    - AWX task manager is running
+    - Instance groups are available
+    - Review `/var/log/tower/` logs on AWX server
+
+    ```bash
+    # Check project update status
+    curl https://awx.example.com/api/v2/project_updates/?project=1 \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use SCM" icon="code-branch">
+    Always use SCM-based projects instead of manual projects for better version control
+  </Card>
+
+  <Card title="Enable Updates" icon="arrows-rotate">
+    Enable update-on-launch for development, disable for production (use manual updates)
+  </Card>
+
+  <Card title="Branch Strategy" icon="code-fork">
+    Use stable branches for production projects, enable override for testing
+  </Card>
+
+  <Card title="Cache Timeout" icon="clock">
+    Set appropriate cache timeouts to balance freshness and performance
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Job Templates" icon="play" href="/guides/running-jobs">
+    Create job templates using your projects
+  </Card>
+  
+  <Card title="Credentials" icon="key" href="/api/overview">
+    Set up SCM credentials for private repositories
+  </Card>
+  
+  <Card title="Execution Environments" icon="cube" href="/api/overview">
+    Configure execution environments for your projects
+  </Card>
+  
+  <Card title="Project API" icon="code" href="/api/overview">
+    Complete API reference for projects
+  </Card>
+</CardGroup>

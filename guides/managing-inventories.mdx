@@ -1,0 +1,738 @@
+---
+title: Managing Inventories
+description: Learn how to create and manage inventories, hosts, and groups in AWX
+---
+
+Inventories in AWX define the hosts and groups that your playbooks will target. AWX supports static inventories, smart inventories, and dynamic inventory sources.
+
+## Understanding Inventories
+
+An **Inventory** in AWX contains:
+
+- **Hosts**: Individual managed nodes
+- **Groups**: Logical collections of hosts
+- **Variables**: Inventory, group, and host-level variables
+- **Inventory Sources**: Dynamic inventory plugins
+
+### Inventory Types
+
+<CardGroup cols={3}>
+  <Card title="Standard Inventory" icon="server">
+    Traditional static inventory with directly managed hosts and groups
+  </Card>
+  
+  <Card title="Smart Inventory" icon="wand-magic-sparkles">
+    Dynamic inventory based on host filters across all inventories
+  </Card>
+  
+  <Card title="Constructed Inventory" icon="diagram-project">
+    Combines multiple inventories using the constructed inventory plugin
+  </Card>
+</CardGroup>
+
+## Creating a Standard Inventory
+
+<Steps>
+
+<Step title="Create Inventory via Web UI">
+  1. Navigate to **Inventories** in the sidebar
+  2. Click **Add** → **Add inventory**
+  3. Fill in the details:
+     - **Name**: Inventory name
+     - **Organization**: Select organization
+     - **Instance Groups**: Optional instance groups
+     - **Variables**: Inventory-level variables in YAML/JSON
+  4. Click **Save**
+</Step>
+
+<Step title="Create Inventory via API">
+  ```bash
+  curl -X POST https://awx.example.com/api/v2/inventories/ \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "Production Servers",
+      "description": "Production environment inventory",
+      "organization": 1,
+      "variables": "---\nansible_connection: ssh\nansible_user: deploy"
+    }'
+  ```
+</Step>
+
+<Step title="Create Inventory via Ansible">
+  ```yaml
+  - name: Create inventory
+    awx.awx.inventory:
+      name: Production Servers
+      description: Production environment inventory
+      organization: Engineering
+      variables:
+        ansible_connection: ssh
+        ansible_user: deploy
+      state: present
+      controller_host: awx.example.com
+      controller_oauthtoken: "{{ awx_token }}"
+  ```
+</Step>
+
+</Steps>
+
+## Managing Hosts
+
+### Adding Hosts
+
+<Tabs>
+  <Tab title="Web UI">
+    1. Navigate to your inventory
+    2. Click the **Hosts** tab
+    3. Click **Add**
+    4. Enter host details:
+       - **Name**: Hostname or IP address
+       - **Description**: Optional description
+       - **Variables**: Host-specific variables
+    5. Click **Save**
+  </Tab>
+
+  <Tab title="API">
+    ```bash
+    curl -X POST https://awx.example.com/api/v2/inventories/1/hosts/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "web01.example.com",
+        "description": "Web server 1",
+        "enabled": true,
+        "variables": "ansible_host: 192.168.1.10\nansible_port: 22"
+      }'
+    ```
+  </Tab>
+
+  <Tab title="Ansible">
+    ```yaml
+    - name: Add host to inventory
+      awx.awx.host:
+        name: web01.example.com
+        description: Web server 1
+        inventory: Production Servers
+        enabled: true
+        variables:
+          ansible_host: 192.168.1.10
+          ansible_port: 22
+          server_role: web
+        state: present
+    ```
+  </Tab>
+</Tabs>
+
+### Bulk Host Management
+
+```yaml
+- name: Add multiple hosts
+  awx.awx.host:
+    name: "{{ item.name }}"
+    inventory: Production Servers
+    variables:
+      ansible_host: "{{ item.ip }}"
+      server_role: "{{ item.role }}"
+    state: present
+  loop:
+    - { name: web01, ip: 192.168.1.10, role: web }
+    - { name: web02, ip: 192.168.1.11, role: web }
+    - { name: db01, ip: 192.168.1.20, role: database }
+    - { name: db02, ip: 192.168.1.21, role: database }
+```
+
+### Host Variables
+
+Common host variables:
+
+```yaml
+# Connection settings
+ansible_host: 192.168.1.10
+ansible_port: 2222
+ansible_user: admin
+ansible_connection: ssh
+ansible_ssh_private_key_file: /path/to/key
+
+# Become settings
+ansible_become: true
+ansible_become_user: root
+ansible_become_method: sudo
+
+# Custom variables
+server_role: web
+application: myapp
+environment: production
+```
+
+## Managing Groups
+
+### Creating Groups
+
+<Tabs>
+  <Tab title="Web UI">
+    1. Navigate to your inventory
+    2. Click the **Groups** tab
+    3. Click **Add**
+    4. Enter group name and variables
+    5. Click **Save**
+  </Tab>
+
+  <Tab title="API">
+    ```bash
+    curl -X POST https://awx.example.com/api/v2/inventories/1/groups/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "name": "webservers",
+        "description": "Web server group",
+        "variables": "http_port: 80\nhttps_port: 443"
+      }'
+    ```
+  </Tab>
+
+  <Tab title="Ansible">
+    ```yaml
+    - name: Create inventory group
+      awx.awx.group:
+        name: webservers
+        description: Web server group
+        inventory: Production Servers
+        variables:
+          http_port: 80
+          https_port: 443
+        state: present
+    ```
+  </Tab>
+</Tabs>
+
+### Adding Hosts to Groups
+
+```yaml
+# Add host to group
+- name: Associate host with group
+  awx.awx.group:
+    name: webservers
+    inventory: Production Servers
+    hosts:
+      - web01.example.com
+      - web02.example.com
+    state: present
+    preserve_existing_hosts: true
+```
+
+### Nested Groups
+
+Create parent-child group relationships:
+
+```yaml
+# Create parent group
+- name: Create production group
+  awx.awx.group:
+    name: production
+    inventory: Production Servers
+    state: present
+
+# Create child groups
+- name: Create child groups
+  awx.awx.group:
+    name: "{{ item }}"
+    inventory: Production Servers
+    state: present
+  loop:
+    - webservers
+    - databases
+    - loadbalancers
+
+# Set up parent-child relationships
+- name: Add children to production group
+  awx.awx.group:
+    name: production
+    inventory: Production Servers
+    children:
+      - webservers
+      - databases
+      - loadbalancers
+    state: present
+    preserve_existing_children: true
+```
+
+Resulting structure:
+```
+production/
+├── webservers/
+│   ├── web01
+│   └── web02
+├── databases/
+│   ├── db01
+│   └── db02
+└── loadbalancers/
+    └── lb01
+```
+
+## Dynamic Inventory Sources
+
+AWX supports various cloud and infrastructure providers as dynamic inventory sources:
+
+### Supported Sources
+
+- Amazon EC2
+- Google Compute Engine
+- Microsoft Azure
+- VMware vCenter
+- OpenStack
+- Red Hat Satellite
+- Red Hat Insights
+- ServiceNow
+- SCM (Git-based inventory)
+- Custom scripts
+- And many more via inventory plugins
+
+### Creating an AWS EC2 Inventory Source
+
+<Steps>
+
+<Step title="Create AWS Credential">
+  ```yaml
+  - name: Create AWS credential
+    awx.awx.credential:
+      name: AWS Credentials
+      credential_type: Amazon Web Services
+      organization: Engineering
+      inputs:
+        username: "{{ aws_access_key }}"
+        password: "{{ aws_secret_key }}"
+      state: present
+  ```
+</Step>
+
+<Step title="Create Inventory Source">
+  ```yaml
+  - name: Create EC2 inventory source
+    awx.awx.inventory_source:
+      name: AWS EC2 Production
+      inventory: Production Servers
+      source: ec2
+      credential: AWS Credentials
+      update_on_launch: true
+      update_cache_timeout: 3600
+      overwrite: true
+      overwrite_vars: true
+      source_vars:
+        regions:
+          - us-east-1
+          - us-west-2
+        filters:
+          tag:Environment: production
+        keyed_groups:
+          - key: tags.Role
+            prefix: role
+        hostnames:
+          - private-ip-address
+      state: present
+  ```
+</Step>
+
+<Step title="Sync Inventory Source">
+  ```yaml
+  - name: Update inventory source
+    awx.awx.inventory_source_update:
+      name: AWS EC2 Production
+      inventory: Production Servers
+      wait: true
+  ```
+</Step>
+
+</Steps>
+
+### SCM-Based Inventory
+
+Use inventory files from Git repositories:
+
+```yaml
+- name: Create SCM inventory source
+  awx.awx.inventory_source:
+    name: Git Inventory
+    inventory: Production Servers
+    source: scm
+    source_project: Infrastructure Playbooks
+    source_path: inventory/production.yml
+    update_on_launch: true
+    overwrite: true
+    state: present
+```
+
+### Custom Inventory Scripts
+
+<Warning>
+  Custom inventory scripts are deprecated. Use inventory plugins instead where possible.
+</Warning>
+
+For custom sources, use the `constructed` source type with source_vars defining your logic.
+
+## Smart Inventories
+
+Smart inventories dynamically group hosts based on filters:
+
+### Creating a Smart Inventory
+
+```yaml
+- name: Create smart inventory for web servers
+  awx.awx.inventory:
+    name: All Web Servers
+    organization: Engineering
+    kind: smart
+    host_filter: 'server_role="web"'
+    state: present
+```
+
+### Host Filter Examples
+
+```yaml
+# Hosts with specific variable
+host_filter: 'server_role="database"'
+
+# Multiple conditions (AND)
+host_filter: 'server_role="web" and environment="production"'
+
+# Multiple conditions (OR)
+host_filter: 'server_role="web" or server_role="api"'
+
+# Inventory membership
+host_filter: 'inventory="Production Servers"'
+
+# Group membership
+host_filter: 'groups__name="webservers"'
+
+# Complex queries
+host_filter: 'server_role="web" and environment="production" and inventory="Production Servers"'
+```
+
+## Constructed Inventories
+
+Constructed inventories parse multiple source inventories:
+
+```yaml
+- name: Create constructed inventory
+  awx.awx.inventory:
+    name: Multi-Region Inventory
+    organization: Engineering
+    kind: constructed
+    state: present
+
+- name: Link input inventories
+  awx.awx.inventory:
+    name: Multi-Region Inventory
+    organization: Engineering
+    input_inventories:
+      - US East Production
+      - US West Production
+      - EU Production
+    state: present
+```
+
+The constructed inventory source is automatically created and can be configured:
+
+```yaml
+source_vars:
+  plugin: constructed
+  strict: false
+  compose:
+    full_name: name + '.' + domain
+  groups:
+    webservers: "'web' in server_role"
+    databases: "'db' in server_role"
+  keyed_groups:
+    - key: environment
+      prefix: env
+```
+
+## Inventory Variables Hierarchy
+
+Variables are resolved in this order (later takes precedence):
+
+1. Inventory variables
+2. Group variables (parent groups first)
+3. Host variables
+4. Extra variables (from job launch)
+
+Example:
+
+```yaml
+# Inventory variables
+ansible_connection: ssh
+ansible_user: deploy
+
+# Group variables (webservers)
+http_port: 80
+ansible_user: webadmin  # Overrides inventory
+
+# Host variables (web01)
+ansible_host: 192.168.1.10
+http_port: 8080  # Overrides group
+
+# Final variables for web01:
+# ansible_connection: ssh
+# ansible_user: webadmin
+# ansible_host: 192.168.1.10
+# http_port: 8080
+```
+
+## Limiting Job Execution
+
+Limit jobs to specific hosts or groups:
+
+```yaml
+# In job template
+- name: Create job template with limit
+  awx.awx.job_template:
+    name: Deploy Web Application
+    inventory: Production Servers
+    limit: "webservers:&production"  # webservers AND production
+    ask_limit_on_launch: true
+    state: present
+```
+
+Launch with custom limit:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/job_templates/1/launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"limit": "web01:web02"}'
+```
+
+### Limit Patterns
+
+```yaml
+# Single host
+limit: "web01"
+
+# Multiple hosts
+limit: "web01:web02:web03"
+
+# Group
+limit: "webservers"
+
+# Multiple groups
+limit: "webservers:databases"
+
+# Intersection (AND)
+limit: "webservers:&production"
+
+# Exclusion (NOT)
+limit: "webservers:!web01"
+
+# Complex patterns
+limit: "webservers:&production:!web01"
+```
+
+## Inventory Sync Scheduling
+
+Schedule automatic inventory source updates:
+
+```yaml
+- name: Schedule daily inventory sync
+  awx.awx.schedule:
+    name: Daily EC2 Sync
+    unified_job_template: AWS EC2 Production
+    rrule: "DTSTART:20260101T060000Z RRULE:FREQ=DAILY;INTERVAL=1"
+    enabled: true
+    state: present
+```
+
+## Instance Groups
+
+Assign instance groups to control where jobs run:
+
+```yaml
+- name: Create inventory with instance groups
+  awx.awx.inventory:
+    name: Production Servers
+    organization: Engineering
+    instance_groups:
+      - Production Instance Group
+      - Default
+    prevent_instance_group_fallback: false
+    state: present
+```
+
+## Inventory Permissions
+
+Grant access to inventories:
+
+```yaml
+# Grant team use permission
+- name: Grant inventory access
+  awx.awx.role:
+    team: DevOps Team
+    inventory: Production Servers
+    role: use
+    state: present
+
+# Grant adhoc permission (run ad-hoc commands)
+- name: Grant adhoc permission
+  awx.awx.role:
+    user: admin.user
+    inventory: Production Servers
+    role: adhoc
+    state: present
+
+# Grant update permission (sync inventory sources)
+- name: Grant update permission
+  awx.awx.role:
+    user: automation.user
+    inventory: Production Servers
+    role: update
+    state: present
+```
+
+Inventory roles:
+- **Admin**: Full control
+- **Use**: Use in job templates
+- **Adhoc**: Run ad-hoc commands
+- **Update**: Sync inventory sources
+- **Read**: View-only access
+
+## Viewing Inventory Data
+
+### Get Inventory Script Output
+
+```bash
+# Get inventory in Ansible format
+curl https://awx.example.com/api/v2/inventories/1/script/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Output:
+```json
+{
+  "all": {
+    "hosts": ["web01", "db01"],
+    "vars": {
+      "ansible_connection": "ssh"
+    },
+    "children": ["webservers", "databases"]
+  },
+  "webservers": {
+    "hosts": ["web01", "web02"],
+    "vars": {
+      "http_port": 80
+    }
+  },
+  "_meta": {
+    "hostvars": {
+      "web01": {
+        "ansible_host": "192.168.1.10"
+      }
+    }
+  }
+}
+```
+
+### List Hosts
+
+```bash
+# List all hosts in inventory
+curl https://awx.example.com/api/v2/inventories/1/hosts/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# List hosts in a group
+curl https://awx.example.com/api/v2/groups/1/hosts/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Inventory source sync fails">
+    Check:
+    - Credentials are valid and have necessary permissions
+    - Network connectivity to the source (cloud provider, vCenter, etc.)
+    - Source configuration (regions, filters) is correct
+    - Review sync job output:
+
+    ```bash
+    curl https://awx.example.com/api/v2/inventory_updates/123/stdout/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Accordion>
+
+  <Accordion title="Hosts not appearing after sync">
+    Common issues:
+    - **Overwrite settings**: Check `overwrite` and `overwrite_vars` settings
+    - **Filters**: Verify source filters aren't excluding hosts
+    - **Enabled state**: Check if `enabled_var` and `enabled_value` are correct
+    
+    Test the inventory plugin locally:
+    ```bash
+    ansible-inventory -i aws_ec2.yml --graph
+    ```
+  </Accordion>
+
+  <Accordion title="Variable precedence issues">
+    Variables not applying as expected:
+    
+    1. Check variable precedence: inventory → group → host → extra_vars
+    2. Use `ansible-inventory` to debug:
+    
+    ```bash
+    # Get final variables for a host
+    curl https://awx.example.com/api/v2/hosts/1/variable_data/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Accordion>
+
+  <Accordion title="Smart inventory filter not working">
+    - Verify filter syntax: use field lookups like `groups__name` for relationships
+    - Test filter in the API:
+    
+    ```bash
+    # Preview smart inventory results
+    curl 'https://awx.example.com/api/v2/hosts/?server_role=web' \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+    
+    - Common filter fields: `name`, `groups__name`, `inventory`, custom variables
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Dynamic Sources" icon="cloud">
+    Prefer dynamic inventory sources over manual host management for cloud environments
+  </Card>
+
+  <Card title="Organize with Groups" icon="layer-group">
+    Use groups to organize hosts logically and share variables
+  </Card>
+
+  <Card title="Leverage Smart Inventories" icon="filter">
+    Create smart inventories for cross-inventory queries and automation
+  </Card>
+
+  <Card title="Schedule Syncs" icon="clock">
+    Set up scheduled syncs for dynamic sources to keep inventory current
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Running Jobs" icon="play" href="/guides/running-jobs">
+    Execute playbooks against your inventories
+  </Card>
+  
+  <Card title="Inventory API" icon="code" href="/api/overview">
+    Complete API reference for inventories
+  </Card>
+  
+  <Card title="Credentials" icon="key" href="/api/overview">
+    Configure credentials for inventory sources
+  </Card>
+  
+  <Card title="Organizations" icon="building" href="/guides/organizations-and-teams">
+    Organize inventories within organizations
+  </Card>
+</CardGroup>

@@ -1,0 +1,509 @@
+---
+title: Webhooks
+description: Trigger AWX jobs automatically from external systems via webhooks
+icon: webhook
+---
+
+Webhooks enable external systems like GitHub, GitLab, and Bitbucket to automatically trigger AWX jobs in response to events such as code pushes, pull requests, and releases.
+
+## Overview
+
+AWX supports webhook integration for:
+- **GitHub** - GitHub.com and GitHub Enterprise
+- **GitLab** - GitLab.com and self-hosted GitLab
+- **Bitbucket Data Center** - Self-hosted Bitbucket
+
+<Note>
+Webhooks provide a secure way to trigger automation based on repository events without polling or manual intervention.
+</Note>
+
+## Webhook Components
+
+### Webhook Key
+
+Each Job Template and Workflow Job Template can have an associated webhook key:
+- Secret token used to validate incoming webhook requests
+- Automatically generated when webhook service is enabled
+- Can be rotated for security
+
+### Webhook Service
+
+Specifies which external service sends the webhook:
+- `github`
+- `gitlab`
+- `bitbucket_dc`
+
+### Webhook Credential
+
+Optional credential for authenticating back to the external service:
+- Used to post status updates
+- Enables AWX to update commit statuses
+
+## Configuration
+
+### Step 1: Enable Webhooks on Template
+
+Configure a Job Template or Workflow Job Template for webhook support:
+
+```bash
+curl -X PATCH https://awx.example.com/api/v2/job_templates/42/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "webhook_service": "github",
+    "webhook_credential": 15
+  }'
+```
+
+<Steps>
+  <Step title="Set Webhook Service">
+    Choose `github`, `gitlab`, or `bitbucket_dc`
+  </Step>
+  <Step title="Configure Credential (Optional)">
+    Associate a credential for status updates
+  </Step>
+  <Step title="Save Template">
+    Webhook key is automatically generated
+  </Step>
+</Steps>
+
+### Step 2: Retrieve Webhook Key
+
+Get the webhook key for configuring the external service:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/42/webhook_key/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**Response:**
+```json
+{
+  "webhook_key": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0"
+}
+```
+
+<Warning>
+Store the webhook key securely. It's required to configure the external service and validates incoming webhook requests.
+</Warning>
+
+### Step 3: Configure External Service
+
+Set up the webhook in your repository:
+
+#### GitHub
+
+<Steps>
+  <Step title="Navigate to Repository Settings">
+    Go to Settings → Webhooks → Add webhook
+  </Step>
+  <Step title="Configure Webhook URL">
+    ```
+    https://awx.example.com/api/v2/job_templates/42/github/
+    ```
+    Or for workflows:
+    ```
+    https://awx.example.com/api/v2/workflow_job_templates/15/github/
+    ```
+  </Step>
+  <Step title="Set Content Type">
+    Select `application/json`
+  </Step>
+  <Step title="Add Secret">
+    Paste the webhook key from AWX
+  </Step>
+  <Step title="Choose Events">
+    Select events that should trigger jobs (push, pull_request, etc.)
+  </Step>
+</Steps>
+
+#### GitLab
+
+<Steps>
+  <Step title="Navigate to Repository Settings">
+    Go to Settings → Webhooks
+  </Step>
+  <Step title="Configure Webhook URL">
+    ```
+    https://awx.example.com/api/v2/job_templates/42/gitlab/
+    ```
+  </Step>
+  <Step title="Add Secret Token">
+    Paste the webhook key from AWX
+  </Step>
+  <Step title="Select Triggers">
+    Choose events (Push events, Merge request events, etc.)
+  </Step>
+  <Step title="Disable SSL Verification (if needed)">
+    Only for self-signed certificates in non-production
+  </Step>
+</Steps>
+
+#### Bitbucket Data Center
+
+<Steps>
+  <Step title="Navigate to Repository Settings">
+    Go to Repository settings → Webhooks → Create webhook
+  </Step>
+  <Step title="Configure Webhook URL">
+    ```
+    https://awx.example.com/api/v2/job_templates/42/bitbucket_dc/
+    ```
+  </Step>
+  <Step title="Set Secret">
+    Paste the webhook key from AWX
+  </Step>
+  <Step title="Choose Events">
+    Select triggers (Repository push, Pull request opened, etc.)
+  </Step>
+</Steps>
+
+## Webhook Behavior
+
+### Request Processing
+
+When a webhook is received:
+
+<Steps>
+  <Step title="Signature Verification">
+    AWX validates the webhook signature using the webhook key
+  </Step>
+  <Step title="Duplicate Detection">
+    Checks if this webhook GUID has already been processed
+  </Step>
+  <Step title="Event Extraction">
+    Extracts event type, GUID, ref (branch/tag/commit), and status API URL
+  </Step>
+  <Step title="Job Creation">
+    Creates a new job with webhook metadata
+  </Step>
+  <Step title="Job Launch">
+    Queues and starts the job
+  </Step>
+</Steps>
+
+### Signature Verification
+
+Each webhook service uses different signature methods:
+
+**GitHub:**
+- Header: `X-Hub-Signature`
+- Algorithm: HMAC SHA-1
+- Format: `sha1=<signature>`
+
+**GitLab:**
+- Header: `X-Gitlab-Token`
+- Algorithm: Direct token comparison (no HMAC)
+- Format: Plain text token
+
+**Bitbucket Data Center:**
+- Header: `X-Hub-Signature`
+- Algorithm: HMAC SHA-256 or SHA-1
+- Format: `sha256=<signature>` or `sha1=<signature>`
+- Ping requests are not signed
+
+<Warning>
+All webhook requests are rejected if signature verification fails. Ensure the webhook key matches on both sides.
+</Warning>
+
+## Webhook Variables
+
+Webhook events provide extra variables to your playbooks:
+
+```yaml
+awx_webhook_event_type: "push"
+awx_webhook_event_guid: "12345678-1234-1234-1234-123456789abc"
+awx_webhook_event_ref: "a1b2c3d4e5f6"
+awx_webhook_status_api: "https://api.github.com/repos/owner/repo/statuses/a1b2c3d4e5f6"
+awx_webhook_payload:
+  ref: "refs/heads/main"
+  repository:
+    name: "my-repo"
+    full_name: "owner/my-repo"
+  commits:
+    - id: "a1b2c3d4e5f6"
+      message: "Update deployment config"
+```
+
+<Note>
+All variables are prefixed with `awx_`, `tower_`, and `ansible_` for compatibility. Use `awx_*` variables in new playbooks.
+</Note>
+
+### Using Webhook Variables
+
+```yaml
+- name: Deploy application on push
+  hosts: webservers
+  tasks:
+    - name: Show webhook info
+      debug:
+        msg: |
+          Event: {{ awx_webhook_event_type }}
+          Branch: {{ awx_webhook_payload.ref }}
+          Commit: {{ awx_webhook_event_ref }}
+          Author: {{ awx_webhook_payload.commits[0].author.name }}
+
+    - name: Clone repository at specific commit
+      git:
+        repo: "{{ awx_webhook_payload.repository.clone_url }}"
+        dest: /var/www/app
+        version: "{{ awx_webhook_event_ref }}"
+```
+
+## Event Types and References
+
+### GitHub Events
+
+Supported event types and their reference keys:
+
+| Event Type | Event Ref (Commit/Tag) |
+|------------|------------------------|
+| `push` | `after` (commit SHA) |
+| `pull_request` | `pull_request.head.sha` |
+| `pull_request_review` | `pull_request.head.sha` |
+| `pull_request_review_comment` | `pull_request.head.sha` |
+| `release` | `release.tag_name` |
+| `commit_comment` | `comment.commit_id` |
+| `create` | `ref` (branch or tag name) |
+| `page_build` | `build.commit` |
+
+### GitLab Events
+
+Supported event types and their reference keys:
+
+| Event Type | Event Ref (Commit/Tag) |
+|------------|------------------------|
+| `Push Hook` | `checkout_sha` |
+| `Tag Push Hook` | `checkout_sha` |
+| `Merge Request Hook` | `object_attributes.last_commit.id` |
+
+### Bitbucket Data Center Events
+
+Supported event types and their reference keys:
+
+| Event Type | Event Ref (Commit/Tag) |
+|------------|------------------------|
+| `repo:refs_changed` | `changes.0.toHash` |
+| `mirror:repo_synchronized` | `changes.0.toHash` |
+| `pr:opened` | `pullRequest.toRef.latestCommit` |
+| `pr:from_ref_updated` | `pullRequest.toRef.latestCommit` |
+| `pr:modified` | `pullRequest.toRef.latestCommit` |
+
+<Note>
+Bitbucket Data Center ignores other event types. Only the events listed above trigger jobs.
+</Note>
+
+## Security
+
+### Webhook Key Rotation
+
+Rotate the webhook key if compromised:
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/job_templates/42/webhook_key/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**Response:**
+```json
+{
+  "webhook_key": "z9y8x7w6v5u4t3s2r1q0p9o8n7m6l5k4j3i2h1g0"
+}
+```
+
+<Warning>
+After rotating the key, update the webhook configuration in your external service immediately. Old key will no longer work.
+</Warning>
+
+### Permissions
+
+Webhook key management requires:
+- **Get webhook key**: Admin role on the template
+- **Rotate webhook key**: Admin role on the template
+
+Webhook receivers:
+- Use `AllowAny` permission (no authentication required)
+- Security provided by signature verification
+- Invalid signatures are rejected with `403 Forbidden`
+
+### Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use HTTPS" icon="lock">
+    Always use HTTPS URLs for webhook endpoints to prevent interception
+  </Card>
+  <Card title="Rotate Keys" icon="rotate">
+    Periodically rotate webhook keys as part of security policy
+  </Card>
+  <Card title="Limit Events" icon="filter">
+    Configure only necessary events to reduce noise and processing
+  </Card>
+  <Card title="Monitor Logs" icon="file-lines">
+    Review webhook logs for suspicious activity or failures
+  </Card>
+</CardGroup>
+
+## Status Updates
+
+When a webhook credential is configured, AWX can post status updates back to the repository.
+
+### GitHub Status Updates
+
+```bash
+POST {{ awx_webhook_status_api }}
+{
+  "state": "success",
+  "target_url": "https://awx.example.com/#/jobs/playbook/123",
+  "description": "AWX job completed successfully",
+  "context": "continuous-integration/awx"
+}
+```
+
+Status appears on commits and pull requests in GitHub UI.
+
+### GitLab Status Updates
+
+```bash
+POST {{ awx_webhook_status_api }}
+{
+  "state": "success",
+  "target_url": "https://awx.example.com/#/jobs/playbook/123",
+  "description": "AWX job completed successfully",
+  "name": "awx-job-template"
+}
+```
+
+### Bitbucket Status Updates
+
+```bash
+POST {{ awx_webhook_status_api }}
+{
+  "state": "SUCCESSFUL",
+  "key": "awx-job-template-42",
+  "name": "AWX Job Template",
+  "url": "https://awx.example.com/#/jobs/playbook/123",
+  "description": "Job completed successfully"
+}
+```
+
+## Troubleshooting
+
+### Webhook Not Triggering Jobs
+
+<Steps>
+  <Step title="Verify Webhook URL">
+    Ensure the URL matches the pattern exactly:
+    ```
+    /api/v2/{job_templates|workflow_job_templates}/<id>/{github|gitlab|bitbucket_dc}/
+    ```
+  </Step>
+  <Step title="Check Webhook Key">
+    Verify the key in the external service matches AWX
+  </Step>
+  <Step title="Review External Service Logs">
+    Check webhook delivery logs in GitHub/GitLab/Bitbucket
+  </Step>
+  <Step title="Examine AWX Logs">
+    Look for webhook-related errors in AWX logs:
+    ```bash
+    docker logs awx_task | grep webhook
+    ```
+  </Step>
+</Steps>
+
+### Signature Verification Failures
+
+<Warning>
+Common causes:
+- Webhook key mismatch between AWX and external service
+- Wrong webhook service type configured (e.g., `github` vs `gitlab`)
+- Network proxy modifying request body
+- Incorrect Content-Type header
+</Warning>
+
+### Duplicate Webhook Detection
+
+If webhooks are being ignored:
+- AWX tracks webhook GUIDs to prevent duplicate processing
+- Redelivering the same webhook from the external service will be ignored
+- This is normal behavior to prevent duplicate job runs
+- Create a new event to trigger a new job
+
+### Jobs Not Using Correct Ref
+
+Ensure your Job Template is configured correctly:
+- Project must support SCM branch override
+- Job Template must have "Prompt on launch" enabled for SCM branch
+- Use `{{ awx_webhook_event_ref }}` to checkout the correct ref
+
+## Use Cases
+
+### Continuous Deployment
+
+<Steps>
+  <Step title="Configure Webhook on Main Branch">
+    Set up webhook to trigger on push events to main branch
+  </Step>
+  <Step title="Create Deployment Job Template">
+    Job template runs deployment playbook
+  </Step>
+  <Step title="Automatic Deployments">
+    Every push to main triggers deployment automatically
+  </Step>
+</Steps>
+
+### Pull Request Testing
+
+```yaml
+- name: Run tests on PR
+  hosts: test_servers
+  tasks:
+    - name: Checkout PR branch
+      git:
+        repo: "{{ awx_webhook_payload.pull_request.head.repo.clone_url }}"
+        dest: /tmp/test-{{ awx_webhook_event_guid }}
+        version: "{{ awx_webhook_event_ref }}"
+
+    - name: Run test suite
+      command: pytest /tmp/test-{{ awx_webhook_event_guid }}/tests
+```
+
+### Multi-Environment Deployments
+
+Use different templates for different branches:
+- `main` branch → Production deployment
+- `staging` branch → Staging deployment
+- `develop` branch → Development deployment
+
+Configure branch filters in your webhook or use conditional logic in playbooks.
+
+## API Reference
+
+### Get Webhook Key
+
+```bash
+GET /api/v2/{job_templates|workflow_job_templates}/<id>/webhook_key/
+```
+
+### Rotate Webhook Key
+
+```bash
+POST /api/v2/{job_templates|workflow_job_templates}/<id>/webhook_key/
+```
+
+### Webhook Receivers
+
+```bash
+POST /api/v2/job_templates/<id>/github/
+POST /api/v2/job_templates/<id>/gitlab/
+POST /api/v2/job_templates/<id>/bitbucket_dc/
+
+POST /api/v2/workflow_job_templates/<id>/github/
+POST /api/v2/workflow_job_templates/<id>/gitlab/
+POST /api/v2/workflow_job_templates/<id>/bitbucket_dc/
+```
+
+<Note>
+Webhook receiver endpoints do not require authentication. Security is provided by signature verification using the webhook key.
+</Note>

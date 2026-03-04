@@ -1,0 +1,340 @@
+---
+title: CLI Configuration
+description: Configure authentication, connection settings, and output formatting for the AWX CLI
+---
+
+The AWX CLI supports multiple configuration methods including command-line flags, environment variables, and configuration files. This guide covers all available configuration options.
+
+## Authentication
+
+The AWX CLI requires authentication to interact with AWX or Ansible Automation Platform instances. There are several methods to provide credentials.
+
+### Command-Line Authentication
+
+Provide credentials directly with each command:
+
+```bash
+awx --conf.host https://awx.example.org \
+    --conf.username alice \
+    --conf.password secret \
+    users list
+```
+
+### Environment Variables
+
+Set environment variables for persistent authentication:
+
+```bash
+export CONTROLLER_HOST=https://awx.example.org
+export CONTROLLER_USERNAME=alice
+export CONTROLLER_PASSWORD=secret
+
+awx users list
+```
+
+<Note>
+  For backward compatibility, `TOWER_HOST`, `TOWER_USERNAME`, and `TOWER_PASSWORD` are also supported but deprecated.
+</Note>
+
+### Credential Files
+
+The CLI can load credentials from a configuration file. Create a credentials file:
+
+```bash
+mkdir -p ~/.awx
+cat > ~/.awx/credentials.yml <<EOF
+default:
+  username: alice
+  password: secret
+EOF
+```
+
+Then reference it:
+
+```bash
+export AWXKIT_CREDENTIAL_FILE=~/.awx/credentials.yml
+export CONTROLLER_HOST=https://awx.example.org
+awx users list
+```
+
+## Authentication Methods
+
+### Session-Based Authentication (Default)
+
+By default, the CLI uses session-based authentication, which is more efficient for multiple commands:
+
+```bash
+# First command establishes a session
+awx jobs list
+# Subsequent commands reuse the session
+awx projects list
+```
+
+Sessions are stored in `~/.awx/sessions/` and automatically managed.
+
+### Basic Authentication
+
+For environments like AAP Gateway where session login is restricted, force Basic authentication:
+
+```bash
+export AWXKIT_FORCE_BASIC_AUTH=true
+export CONTROLLER_USERNAME=alice
+export CONTROLLER_PASSWORD=secret
+
+awx users list
+```
+
+<Warning>
+  Basic authentication requires credentials on every request. Ensure both username and password are provided when `AWXKIT_FORCE_BASIC_AUTH` is enabled.
+</Warning>
+
+## Connection Settings
+
+### Host Configuration
+
+Specify the AWX/AAP host URL:
+
+```bash
+# Command-line flag
+awx --conf.host https://awx.example.org users list
+
+# Environment variable
+export CONTROLLER_HOST=https://awx.example.org
+awx users list
+```
+
+Default: `https://127.0.0.1:443`
+
+### SSL Certificate Verification
+
+By default, SSL certificates are verified. For self-signed certificates or testing:
+
+```bash
+# Command-line flag
+awx --conf.insecure users list
+awx -k users list  # Short form
+
+# Environment variable
+export CONTROLLER_VERIFY_SSL=false
+awx users list
+```
+
+<Warning>
+  Disabling SSL verification exposes you to man-in-the-middle attacks. Only use this in trusted development environments.
+</Warning>
+
+## API Base Path
+
+For Red Hat Ansible Automation Platform 2.5+, set the API base path:
+
+```bash
+export AWXKIT_API_BASE_PATH=/api/controller/
+```
+
+For AWX instances:
+
+```bash
+export AWXKIT_API_BASE_PATH=/api/
+```
+
+Default: `/api/`
+
+## Output Formatting
+
+### Format Options
+
+The CLI supports multiple output formats:
+
+**JSON (default)**
+```bash
+awx users list -f json
+```
+
+**YAML**
+```bash
+awx users list -f yaml
+```
+
+**Human-readable table**
+```bash
+awx users list -f human
+```
+
+**JQ filtering** (requires jq extra)
+```bash
+awx users list -f jq
+```
+
+### Filter Output
+
+Use the `--filter` flag to select specific fields:
+
+```bash
+# Human format with custom columns
+awx users list -f human --filter 'id,username,email'
+
+# JQ format with complex queries
+awx users list -f jq --filter '.results[] | {id, username}'
+```
+
+### Color Output
+
+Control colored output:
+
+```bash
+# Enable color (default)
+awx --conf.color true users list
+
+# Disable color
+awx --conf.color false users list
+
+# Environment variable
+export CONTROLLER_COLOR=false
+```
+
+### Verbose Output
+
+Enable debug logging to see HTTP requests:
+
+```bash
+awx -v users list
+awx --verbose users list
+
+# Environment variable
+export CONTROLLER_VERBOSE=true
+```
+
+## Configuration Priority
+
+When multiple configuration sources are present, they are evaluated in this order (highest to lowest priority):
+
+1. Command-line flags (`--conf.*`)
+2. Environment variables (`CONTROLLER_*`)
+3. Credential files (`AWXKIT_CREDENTIAL_FILE`)
+4. Default values
+
+## Complete Configuration Example
+
+Create a comprehensive shell configuration:
+
+```bash
+# ~/.awxrc
+export CONTROLLER_HOST=https://awx.example.org
+export CONTROLLER_USERNAME=alice
+export CONTROLLER_PASSWORD=secret
+export CONTROLLER_VERIFY_SSL=true
+export CONTROLLER_FORMAT=human
+export CONTROLLER_COLOR=true
+export AWXKIT_API_BASE_PATH=/api/
+```
+
+Source it in your shell profile:
+
+```bash
+echo 'source ~/.awxrc' >> ~/.bashrc
+```
+
+## Verify Configuration
+
+To verify your current configuration:
+
+```bash
+awx config
+```
+
+This displays:
+- Base URL
+- Session authentication status
+- Current credentials (username only, not password)
+
+## Environment Variable Reference
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `CONTROLLER_HOST` | AWX/AAP host URL | `https://127.0.0.1:443` |
+| `CONTROLLER_USERNAME` | Authentication username | `admin` |
+| `CONTROLLER_PASSWORD` | Authentication password | `password` |
+| `CONTROLLER_VERIFY_SSL` | Enable SSL verification | `true` |
+| `CONTROLLER_FORMAT` | Output format (json/yaml/human/jq) | `json` |
+| `CONTROLLER_COLOR` | Enable colored output | `true` |
+| `CONTROLLER_VERBOSE` | Enable debug logging | `false` |
+| `AWXKIT_API_BASE_PATH` | API base path | `/api/` |
+| `AWXKIT_CREDENTIAL_FILE` | Path to credentials file | None |
+| `AWXKIT_FORCE_BASIC_AUTH` | Force Basic authentication | `false` |
+
+## Command-Line Flag Reference
+
+| Flag | Environment Variable | Description |
+|------|---------------------|-------------|
+| `--conf.host` | `CONTROLLER_HOST` | AWX/AAP host URL |
+| `--conf.username` | `CONTROLLER_USERNAME` | Username for authentication |
+| `--conf.password` | `CONTROLLER_PASSWORD` | Password for authentication |
+| `-k, --conf.insecure` | `CONTROLLER_VERIFY_SSL` | Allow insecure SSL connections |
+| `-f, --conf.format` | `CONTROLLER_FORMAT` | Output format |
+| `--filter` | - | Output field filter |
+| `--conf.color` | `CONTROLLER_COLOR` | Enable/disable colors |
+| `-v, --verbose` | `CONTROLLER_VERBOSE` | Enable verbose logging |
+| `--version` | - | Show CLI version |
+| `--help` | - | Show help message |
+
+## Troubleshooting
+
+### Connection Errors
+
+**Error: Connection refused**
+
+```bash
+# Check host URL is correct
+echo $CONTROLLER_HOST
+
+# Verify AWX is accessible
+curl -k $CONTROLLER_HOST/api/v2/
+```
+
+**Error: SSL verification failed**
+
+```bash
+# For self-signed certificates, use -k flag
+awx -k users list
+
+# Or disable verification
+export CONTROLLER_VERIFY_SSL=false
+```
+
+### Authentication Errors
+
+**Error: Unauthorized (401)**
+
+```bash
+# Verify credentials
+awx config
+
+# Try explicit credentials
+awx --conf.username admin --conf.password password users list
+```
+
+**Error: Basic authentication required**
+
+```bash
+# Enable Basic auth for AAP Gateway
+export AWXKIT_FORCE_BASIC_AUTH=true
+```
+
+### AAP 2.5+ Path Issues
+
+**Error: Unable to fetch /api/v2/**
+
+```bash
+# Set correct API base path
+export AWXKIT_API_BASE_PATH=/api/controller/
+```
+
+## Security Best Practices
+
+1. **Never commit credentials** to version control
+2. **Use environment variables** instead of command-line flags in scripts (flags may appear in process lists)
+3. **Restrict credential file permissions**: `chmod 600 ~/.awx/credentials.yml`
+4. **Use separate credentials** for automation vs. interactive use
+5. **Enable SSL verification** in production environments
+6. **Rotate passwords** regularly
+7. **Use RBAC** to limit CLI user permissions to only what's needed

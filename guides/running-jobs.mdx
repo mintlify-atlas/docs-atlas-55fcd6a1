@@ -1,0 +1,663 @@
+---
+title: Running Jobs
+description: Learn how to create job templates and execute Ansible playbooks in AWX
+---
+
+Job templates define how Ansible playbooks are executed in AWX. They bring together projects, inventories, credentials, and playbooks to create reusable automation workflows.
+
+## Understanding Job Templates
+
+A **Job Template** is a definition for running an Ansible playbook. It includes:
+
+- **Project**: Source of playbooks
+- **Playbook**: The specific playbook to run
+- **Inventory**: Target hosts and groups
+- **Credentials**: Authentication for hosts and other services
+- **Execution Environment**: Container image with Ansible and dependencies
+- **Variables**: Extra variables to pass to the playbook
+- **Options**: Verbosity, limits, tags, and other runtime settings
+
+### Job Types
+
+<CardGroup cols={2}>
+  <Card title="Run" icon="play">
+    Execute the playbook normally (default)
+  </Card>
+  
+  <Card title="Check" icon="clipboard-check">
+    Dry-run mode - shows what would change without making changes
+  </Card>
+</CardGroup>
+
+## Creating a Job Template
+
+<Steps>
+
+<Step title="Via Web UI">
+  1. Navigate to **Templates** in the sidebar
+  2. Click **Add** → **Add job template**
+  3. Fill in the required fields:
+     - **Name**: Descriptive name
+     - **Job Type**: Run or Check
+     - **Inventory**: Select target inventory
+     - **Project**: Select project with playbooks
+     - **Playbook**: Choose from available playbooks
+     - **Credentials**: Add required credentials
+  4. Configure options:
+     - **Verbosity**: Output detail level (0-4)
+     - **Forks**: Parallel execution count
+     - **Limit**: Restrict to specific hosts
+     - **Instance Groups**: Where to run the job
+  5. Click **Save**
+</Step>
+
+<Step title="Via API">
+  ```bash
+  curl -X POST https://awx.example.com/api/v2/job_templates/ \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "Deploy Web Application",
+      "description": "Deploys the web application to production",
+      "job_type": "run",
+      "inventory": 1,
+      "project": 1,
+      "playbook": "deploy.yml",
+      "credentials": [1, 2],
+      "verbosity": 0,
+      "extra_vars": "{\"app_version\": \"1.0.0\"}",
+      "allow_simultaneous": false,
+      "ask_variables_on_launch": true
+    }'
+  ```
+</Step>
+
+<Step title="Via Ansible">
+  ```yaml
+  - name: Create job template
+    awx.awx.job_template:
+      name: Deploy Web Application
+      description: Deploys the web application to production
+      job_type: run
+      inventory: Production Servers
+      project: Infrastructure Playbooks
+      playbook: deploy.yml
+      credentials:
+        - SSH Credential
+        - Vault Credential
+      verbosity: 0
+      extra_vars:
+        app_version: "1.0.0"
+      ask_variables_on_launch: true
+      state: present
+      controller_host: awx.example.com
+      controller_oauthtoken: "{{ awx_token }}"
+  ```
+</Step>
+
+</Steps>
+
+## Launching Jobs
+
+### Simple Launch
+
+<Tabs>
+  <Tab title="Web UI">
+    1. Navigate to **Templates**
+    2. Click the rocket icon next to your template
+    3. Fill in any prompted values
+    4. Click **Launch**
+  </Tab>
+
+  <Tab title="API">
+    ```bash
+    # Simple launch
+    curl -X POST https://awx.example.com/api/v2/job_templates/1/launch/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Tab>
+
+  <Tab title="Ansible">
+    ```yaml
+    - name: Launch job template
+      awx.awx.job_launch:
+        job_template: Deploy Web Application
+        wait: true
+        timeout: 3600
+    ```
+  </Tab>
+</Tabs>
+
+### Launch with Extra Variables
+
+<Tabs>
+  <Tab title="API">
+    ```bash
+    curl -X POST https://awx.example.com/api/v2/job_templates/1/launch/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "extra_vars": {
+          "app_version": "2.0.0",
+          "environment": "production",
+          "debug_mode": false
+        }
+      }'
+    ```
+  </Tab>
+
+  <Tab title="Ansible">
+    ```yaml
+    - name: Launch with extra vars
+      awx.awx.job_launch:
+        job_template: Deploy Web Application
+        extra_vars:
+          app_version: "2.0.0"
+          environment: production
+          debug_mode: false
+        wait: true
+    ```
+  </Tab>
+</Tabs>
+
+### Launch with Limit
+
+Restrict execution to specific hosts:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/job_templates/1/launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "limit": "web01:web02"
+  }'
+```
+
+### Launch with Different Inventory
+
+```bash
+curl -X POST https://awx.example.com/api/v2/job_templates/1/launch/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inventory": 2
+  }'
+```
+
+## Job Template Options
+
+### Credentials
+
+Multiple credentials can be attached:
+
+```yaml
+- name: Job template with multiple credentials
+  awx.awx.job_template:
+    name: Complex Deployment
+    project: Infrastructure Playbooks
+    playbook: deploy.yml
+    credentials:
+      - SSH Credential          # Machine credential
+      - AWS Credentials         # Cloud credential
+      - Vault Password          # Vault credential
+      - ServiceNow Token        # Custom credential
+    state: present
+```
+
+Credential types:
+- **Machine (SSH)**: For host authentication
+- **Vault**: Ansible Vault passwords
+- **Cloud**: AWS, Azure, GCP credentials
+- **Network**: Network device credentials
+- **Source Control**: Git/SCM credentials
+- **Custom**: User-defined credential types
+
+### Privilege Escalation
+
+Enable privilege escalation (sudo):
+
+```yaml
+become_enabled: true
+```
+
+In the API:
+```json
+{
+  "become_enabled": true
+}
+```
+
+### Verbosity Levels
+
+```yaml
+# 0 = Normal (default)
+verbosity: 0
+
+# 1 = Verbose (-v)
+verbosity: 1
+
+# 2 = More Verbose (-vv)
+verbosity: 2
+
+# 3 = Debug (-vvv)
+verbosity: 3
+
+# 4 = Connection Debug (-vvvv)
+verbosity: 4
+```
+
+### Forks (Parallelism)
+
+Control parallel execution:
+
+```yaml
+# Run on 10 hosts at a time
+forks: 10
+
+# Run on 50 hosts at a time (higher parallelism)
+forks: 50
+```
+
+### Job Tags
+
+Run specific tagged tasks:
+
+```yaml
+job_tags: "deploy,configure"
+skip_tags: "backup,cleanup"
+```
+
+In Ansible playbook:
+```yaml
+- name: Deploy application
+  tasks:
+    - name: Copy files
+      copy:
+        src: app/
+        dest: /var/www/app/
+      tags: [deploy]
+    
+    - name: Configure app
+      template:
+        src: config.j2
+        dest: /etc/app/config.ini
+      tags: [configure]
+    
+    - name: Backup old version
+      archive:
+        path: /var/www/app/
+        dest: /backup/app.tar.gz
+      tags: [backup]
+```
+
+### Diff Mode
+
+Show file changes:
+
+```yaml
+diff_mode: true
+```
+
+Useful for:
+- Reviewing template changes
+- Auditing configuration modifications
+- Compliance reporting
+
+## Prompt on Launch
+
+Allow users to override values when launching:
+
+```yaml
+- name: Job template with prompts
+  awx.awx.job_template:
+    name: Flexible Deployment
+    project: Infrastructure Playbooks
+    playbook: deploy.yml
+    inventory: Production Servers
+    ask_inventory_on_launch: true
+    ask_credential_on_launch: true
+    ask_variables_on_launch: true
+    ask_limit_on_launch: true
+    ask_tags_on_launch: true
+    ask_skip_tags_on_launch: true
+    ask_job_type_on_launch: true
+    ask_verbosity_on_launch: true
+    ask_diff_mode_on_launch: true
+    state: present
+```
+
+Available prompts:
+- `ask_inventory_on_launch`
+- `ask_credential_on_launch`
+- `ask_variables_on_launch`
+- `ask_limit_on_launch`
+- `ask_tags_on_launch`
+- `ask_skip_tags_on_launch`
+- `ask_job_type_on_launch`
+- `ask_verbosity_on_launch`
+- `ask_diff_mode_on_launch`
+- `ask_scm_branch_on_launch`
+- `ask_execution_environment_on_launch`
+- `ask_forks_on_launch`
+- `ask_timeout_on_launch`
+- `ask_instance_groups_on_launch`
+
+## Job Slicing
+
+Distribute a job across multiple slices for large inventories:
+
+```yaml
+- name: Job template with slicing
+  awx.awx.job_template:
+    name: Large Scale Deployment
+    project: Infrastructure Playbooks
+    playbook: deploy.yml
+    inventory: Production Servers
+    job_slice_count: 10  # Split into 10 parallel jobs
+    state: present
+```
+
+When launched, this creates a workflow job with 10 slices:
+- Each slice processes 1/10th of the inventory
+- Slices run in parallel
+- Overall job completes faster
+
+## Execution Environments
+
+Specify the container image to use:
+
+```yaml
+- name: Job template with custom EE
+  awx.awx.job_template:
+    name: Python 3.11 Deployment
+    project: Infrastructure Playbooks
+    playbook: deploy.yml
+    execution_environment: Custom Python 3.11 EE
+    state: present
+```
+
+## Instance Groups
+
+Control where jobs execute:
+
+```yaml
+- name: Job template with instance groups
+  awx.awx.job_template:
+    name: Regional Deployment
+    project: Infrastructure Playbooks
+    playbook: deploy.yml
+    instance_groups:
+      - US-East Instance Group
+      - Default
+    state: present
+```
+
+Jobs will prefer the first available instance group in the list.
+
+## Job Lifecycle
+
+### Job States
+
+<Steps>
+  <Step title="Pending">
+    Job is queued and waiting to start
+  </Step>
+  
+  <Step title="Waiting">
+    Job is waiting for dependencies or approval
+  </Step>
+  
+  <Step title="Running">
+    Job is currently executing
+  </Step>
+  
+  <Step title="Successful">
+    Job completed without errors
+  </Step>
+  
+  <Step title="Failed">
+    Job failed with errors
+  </Step>
+  
+  <Step title="Error">
+    Job encountered a system error
+  </Step>
+  
+  <Step title="Canceled">
+    Job was canceled by user
+  </Step>
+</Steps>
+
+### Monitoring Job Progress
+
+```bash
+# Get job status
+curl https://awx.example.com/api/v2/jobs/123/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Stream job output (websocket)
+wscat -c "wss://awx.example.com/websocket/" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Get job events
+curl https://awx.example.com/api/v2/jobs/123/job_events/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Get stdout
+curl https://awx.example.com/api/v2/jobs/123/stdout/?format=txt \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Waiting for Job Completion
+
+```yaml
+- name: Launch and wait for job
+  awx.awx.job_launch:
+    job_template: Deploy Web Application
+    wait: true
+    timeout: 1800  # 30 minutes
+  register: job
+
+- name: Display job result
+  debug:
+    msg: "Job {{ job.id }} finished with status {{ job.status }}"
+```
+
+### Canceling Jobs
+
+<Tabs>
+  <Tab title="Web UI">
+    Click the **Cancel** button on the job details page
+  </Tab>
+
+  <Tab title="API">
+    ```bash
+    curl -X POST https://awx.example.com/api/v2/jobs/123/cancel/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Tab>
+
+  <Tab title="Ansible">
+    ```yaml
+    - name: Cancel job
+      awx.awx.job_cancel:
+        job_id: 123
+    ```
+  </Tab>
+</Tabs>
+
+## Relaunching Jobs
+
+Relaunch a job with the same parameters:
+
+```bash
+curl -X POST https://awx.example.com/api/v2/jobs/123/relaunch/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Relaunch uses:
+- Same inventory, project, playbook
+- Same credentials
+- Same extra variables
+- Same limit, tags, etc.
+
+## Simultaneous Jobs
+
+By default, job templates don't allow concurrent execution. Enable it:
+
+```yaml
+allow_simultaneous: true
+```
+
+<Warning>
+  Be careful with simultaneous jobs - they may conflict if they modify the same resources.
+</Warning>
+
+## Webhooks
+
+Trigger jobs via webhooks (GitHub, GitLab, etc.):
+
+```yaml
+- name: Enable webhook
+  awx.awx.job_template:
+    name: Deploy on Push
+    project: Infrastructure Playbooks
+    playbook: deploy.yml
+    webhook_service: github
+    webhook_credential: GitHub Webhook Secret
+    state: present
+```
+
+Webhook URL format:
+```
+https://awx.example.com/api/v2/job_templates/1/github/
+```
+
+Configure in GitHub:
+1. Repository Settings → Webhooks → Add webhook
+2. Payload URL: Your AWX webhook URL
+3. Content type: `application/json`
+4. Secret: Your webhook credential
+5. Events: Push, Pull Request, etc.
+
+## Job Templates vs. Workflows
+
+<CardGroup cols={2}>
+  <Card title="Job Templates" icon="file">
+    Run a single playbook
+    
+    **Use when:**
+    - Single task to execute
+    - Simple automation
+    - No dependencies
+  </Card>
+  
+  <Card title="Workflows" icon="diagram-project">
+    Chain multiple job templates
+    
+    **Use when:**
+    - Multi-stage deployments
+    - Conditional logic
+    - Complex orchestration
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Surveys" icon="clipboard-question">
+    Create surveys for user-friendly variable input
+  </Card>
+
+  <Card title="Set Timeouts" icon="clock">
+    Configure reasonable timeouts to prevent hung jobs
+  </Card>
+
+  <Card title="Limit Scope" icon="filter">
+    Use limits and tags to minimize blast radius
+  </Card>
+
+  <Card title="Test in Check Mode" icon="vial">
+    Always test with `job_type: check` first
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Job fails immediately">
+    Common causes:
+    - Missing or invalid credentials
+    - Inventory is empty
+    - Project sync failed
+    - Playbook not found
+    
+    Check job output:
+    ```bash
+    curl https://awx.example.com/api/v2/jobs/123/stdout/?format=txt \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Accordion>
+
+  <Accordion title="Job stuck in pending">
+    Possible issues:
+    - No available instance groups
+    - Capacity limits reached
+    - Previous job blocking (simultaneous = false)
+    
+    Check instance capacity:
+    ```bash
+    curl https://awx.example.com/api/v2/instances/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Accordion>
+
+  <Accordion title="Playbook not found in project">
+    Verify:
+    - Project update completed successfully
+    - Playbook file has `.yml` or `.yaml` extension
+    - Playbook is valid Ansible syntax
+    - File is in the project repository
+    
+    List available playbooks:
+    ```bash
+    curl https://awx.example.com/api/v2/projects/1/playbooks/ \
+      -H "Authorization: Bearer YOUR_TOKEN"
+    ```
+  </Accordion>
+
+  <Accordion title="Variables not applying">
+    Check variable precedence:
+    1. Job extra_vars (highest)
+    2. Job template extra_vars
+    3. Survey responses
+    4. Host/group variables
+    5. Inventory variables (lowest)
+    
+    View final variables:
+    ```bash
+    curl https://awx.example.com/api/v2/jobs/123/ \
+      -H "Authorization: Bearer YOUR_TOKEN" | jq '.extra_vars'
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Surveys" icon="clipboard-question" href="/guides/surveys">
+    Add surveys to job templates for user input
+  </Card>
+  
+  <Card title="Scheduling" icon="calendar" href="/guides/scheduling">
+    Schedule jobs to run automatically
+  </Card>
+  
+  <Card title="Notifications" icon="bell" href="/guides/notifications">
+    Set up notifications for job status
+  </Card>
+  
+  <Card title="Workflows" icon="diagram-project" href="/api/overview">
+    Create complex workflows with multiple jobs
+  </Card>
+</CardGroup>

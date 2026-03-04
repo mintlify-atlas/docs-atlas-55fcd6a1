@@ -1,0 +1,360 @@
+---
+title: 'Teams'
+description: 'Manage AWX teams via the API'
+---
+
+## Overview
+
+Teams provide a way to group users and assign permissions collectively within an organization. Teams belong to an organization and can be granted roles on various resources.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/teams/` | List teams |
+| POST | `/api/v2/teams/` | Create team |
+| GET | `/api/v2/teams/{id}/` | Retrieve team |
+| PATCH | `/api/v2/teams/{id}/` | Update team |
+| DELETE | `/api/v2/teams/{id}/` | Delete team |
+
+## List Teams
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/teams/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Create Team
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/teams/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "DevOps Team",
+    "description": "Infrastructure and deployment team",
+    "organization": 1
+  }'
+```
+
+<ParamField body="name" type="string" required>
+  Name of the team (unique within organization)
+</ParamField>
+
+<ParamField body="description" type="string">
+  Team description
+</ParamField>
+
+<ParamField body="organization" type="integer" required>
+  ID of the parent organization
+</ParamField>
+
+## Retrieve Team
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/teams/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Response Schema
+
+<ResponseField name="id" type="integer">
+  Team ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Team name
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Team description
+</ResponseField>
+
+<ResponseField name="organization" type="integer">
+  Parent organization ID
+</ResponseField>
+
+<ResponseField name="created" type="string">
+  Creation timestamp (ISO 8601)
+</ResponseField>
+
+<ResponseField name="modified" type="string">
+  Last modification timestamp
+</ResponseField>
+
+<ResponseField name="related" type="object">
+  Links to related resources:
+  - `organization` - Parent organization
+  - `users` - Team members
+  - `projects` - Projects the team has access to
+  - `credentials` - Credentials the team has access to
+  - `roles` - Roles assigned to the team
+  - `object_roles` - Object-level roles
+  - `activity_stream` - Activity log
+  - `access_list` - Access list
+</ResponseField>
+
+<ResponseField name="summary_fields" type="object">
+  Summary information about the organization and related objects
+</ResponseField>
+
+## Update Team
+
+```bash
+curl -X PATCH \
+  https://awx.example.com/api/v2/teams/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Updated team description"
+  }'
+```
+
+## Delete Team
+
+```bash
+curl -X DELETE \
+  https://awx.example.com/api/v2/teams/5/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Team Users
+
+### List Team Members
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/teams/5/users/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Add User to Team
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/teams/5/users/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 10
+  }'
+```
+
+<ParamField body="id" type="integer" required>
+  User ID to add to the team
+</ParamField>
+
+### Remove User from Team
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/teams/5/users/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 10,
+    "disassociate": true
+  }'
+```
+
+## Team Projects
+
+List projects the team has access to:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/teams/5/projects/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Team Credentials
+
+List credentials the team has access to:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/teams/5/credentials/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Roles
+
+### List Team Roles
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/teams/5/roles/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Shows all roles assigned to the team across all resources.
+
+### List Object Roles
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/teams/5/object_roles/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Shows available roles that can be granted on the team itself:
+- **member_role** - Team membership
+- **admin_role** - Team administration
+
+### Grant Team Role on Resource
+
+To grant a team role on a resource (e.g., project):
+
+```bash
+# 1. Get the role ID for the resource
+curl -X GET \
+  https://awx.example.com/api/v2/projects/7/object_roles/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# 2. Add the team to the role
+curl -X POST \
+  https://awx.example.com/api/v2/roles/{role_id}/teams/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": 5
+  }'
+```
+
+## Activity Stream
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/teams/5/activity_stream/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Access List
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/teams/5/access_list/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Shows which users have access to the team and their roles.
+
+## Filtering
+
+```bash
+# By name
+?name=DevOps
+
+# By organization
+?organization=1
+
+# By organization name
+?organization__name=Engineering
+
+# Search
+?search=devops
+```
+
+## Ordering
+
+```bash
+# By name
+?order_by=name
+
+# By creation date
+?order_by=-created
+
+# By organization
+?order_by=organization__name
+```
+
+## Complete Example
+
+```python
+import requests
+import json
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Create team
+team_data = {
+    "name": "Backend Engineers",
+    "description": "Backend development team",
+    "organization": 1
+}
+
+response = requests.post(
+    f"{base_url}/teams/",
+    headers=headers,
+    data=json.dumps(team_data)
+)
+
+if response.status_code == 201:
+    team = response.json()
+    team_id = team['id']
+    print(f"Created team {team_id}")
+    
+    # Add users to team
+    user_ids = [10, 11, 12]
+    for user_id in user_ids:
+        add_response = requests.post(
+            f"{base_url}/teams/{team_id}/users/",
+            headers=headers,
+            data=json.dumps({"id": user_id})
+        )
+        if add_response.status_code == 204:
+            print(f"Added user {user_id} to team")
+    
+    # List team members
+    members = requests.get(
+        f"{base_url}/teams/{team_id}/users/",
+        headers=headers
+    ).json()
+    
+    print(f"Team has {members['count']} members")
+else:
+    print(f"Error: {response.status_code}")
+    print(response.json())
+```
+
+## Team Permissions Model
+
+Teams provide an efficient way to manage permissions:
+
+1. **Create Team** - Within an organization
+2. **Add Users** - Add members to the team
+3. **Grant Roles** - Assign roles on resources to the team
+4. **Inherit Permissions** - All team members inherit the team's permissions
+
+This is more maintainable than assigning roles individually to users.
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Descriptive Names">
+    Name teams clearly to indicate their purpose:
+    - "Production Deploy Team"
+    - "Database Administrators"
+    - "QA Automation Team"
+  </Accordion>
+
+  <Accordion title="Align with Organizations">
+    Create teams that align with your organizational structure and match how you manage permissions.
+  </Accordion>
+
+  <Accordion title="Use Teams for Role Assignment">
+    Prefer assigning roles to teams rather than individual users for easier management.
+  </Accordion>
+
+  <Accordion title="Document Team Purposes">
+    Use the description field to document the team's purpose and responsibilities.
+  </Accordion>
+</AccordionGroup>

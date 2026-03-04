@@ -1,0 +1,614 @@
+---
+title: CLI Usage
+description: Learn how to use the AWX CLI for common operations and workflows
+---
+
+The AWX CLI follows a consistent pattern for all operations: `awx [options] <resource> <action> [arguments]`. This guide covers common usage patterns and workflows.
+
+## Command Structure
+
+Every AWX CLI command follows this format:
+
+```bash
+awx [<global-options>] <resource> <action> [<arguments>]
+```
+
+- **global-options**: Configuration flags like `--conf.host`, `-f`, `-v`
+- **resource**: The type of AWX object (users, jobs, projects, etc.)
+- **action**: The operation to perform (list, get, create, modify, delete, etc.)
+- **arguments**: Action-specific parameters
+
+## Discovering Resources
+
+To see all available resources:
+
+```bash
+awx --conf.host https://awx.example.org --help
+```
+
+This displays resources like:
+- `users` - User accounts
+- `organizations` - Organizations
+- `projects` - Project definitions
+- `inventories` - Inventory definitions
+- `job_templates` - Job templates
+- `jobs` - Job executions
+- `credentials` - Credentials
+- And many more...
+
+## Discovering Actions
+
+To see available actions for a resource:
+
+```bash
+awx users --help
+```
+
+Common actions include:
+- `list` - List all resources
+- `get` - Get a specific resource by ID or name
+- `create` - Create a new resource
+- `modify` - Update an existing resource
+- `delete` - Delete a resource
+
+Some resources have special actions like `launch`, `update`, `monitor`, etc.
+
+## Basic Operations
+
+### Listing Resources
+
+List all resources of a type:
+
+```bash
+awx users list
+awx projects list
+awx job_templates list
+```
+
+With human-readable output:
+
+```bash
+awx users list -f human
+```
+
+With custom columns:
+
+```bash
+awx users list -f human --filter 'id,username,email,is_superuser'
+```
+
+### Getting a Specific Resource
+
+Retrieve by ID:
+
+```bash
+awx users get 1
+```
+
+Retrieve by name (for resources that support it):
+
+```bash
+awx users get alice
+```
+
+With human-readable output:
+
+```bash
+awx users get alice -f human
+```
+
+### Creating Resources
+
+Create a new resource:
+
+```bash
+awx users create \
+    --username bob \
+    --password secret123 \
+    --email bob@example.com \
+    --first_name Bob \
+    --last_name Smith
+```
+
+To see required arguments:
+
+```bash
+awx users create --help
+```
+
+### Modifying Resources
+
+Update an existing resource:
+
+```bash
+awx users modify alice --email alice.new@example.com
+awx users modify 1 --first_name Alice
+```
+
+### Deleting Resources
+
+Delete by ID or name:
+
+```bash
+awx users delete bob
+awx users delete 42
+```
+
+## Advanced Operations
+
+### Filtering Lists
+
+Filter results using query parameters:
+
+```bash
+# Filter users by username
+awx users list --username alice
+
+# Filter jobs by status
+awx jobs list --status successful
+
+# Filter projects by organization
+awx projects list --organization 1
+```
+
+### Pagination
+
+By default, the CLI returns the first page of results. To get all pages:
+
+```bash
+awx jobs list --all
+```
+
+### Sorting
+
+Sort results by field:
+
+```bash
+# Sort ascending
+awx jobs list --order_by created
+
+# Sort descending
+awx jobs list --order_by '-created'
+
+# Multiple sort fields
+awx jobs list --order_by 'status,-created'
+```
+
+### Working with JSON/YAML Data
+
+Many fields accept JSON or YAML input:
+
+```bash
+# Inline JSON
+awx credentials create \
+    --name 'SSH Key' \
+    --credential_type 'Machine' \
+    --inputs '{"username": "ansible", "password": "secret"}'
+
+# From file
+awx credentials create \
+    --name 'SSH Key' \
+    --credential_type 'Machine' \
+    --inputs @credentials.json
+```
+
+### File References
+
+For fields containing file data (like SSH keys):
+
+```bash
+awx credentials create \
+    --credential_type 'Machine' \
+    --name 'My SSH Key' \
+    --inputs '{"username": "ansible", "ssh_key_data": "@~/.ssh/id_rsa"}'
+```
+
+## Special Actions
+
+### Launching Jobs
+
+Launch a job template:
+
+```bash
+# Launch by name
+awx job_templates launch 'Deploy Application'
+
+# Launch by ID
+awx job_templates launch 42
+
+# Launch with extra variables
+awx job_templates launch 'Deploy Application' \
+    --extra_vars '{"version": "1.2.3"}'
+
+# Launch and monitor output
+awx job_templates launch 'Deploy Application' --monitor
+
+# Launch and wait for completion (no output)
+awx job_templates launch 'Deploy Application' --wait
+```
+
+### Monitoring Jobs
+
+Watch job output in real-time:
+
+```bash
+awx jobs monitor 123
+```
+
+Get job stdout:
+
+```bash
+awx jobs stdout 123
+```
+
+### Updating Projects
+
+Trigger a project update:
+
+```bash
+awx projects update 'My Project'
+awx projects update 5 --monitor
+```
+
+### Inventory Updates
+
+Update an inventory source:
+
+```bash
+awx inventory_sources update 'AWS Dynamic Inventory'
+awx inventory_sources update 10 --monitor
+```
+
+## Working with Relationships
+
+### Associating Resources
+
+Associate credentials with job templates:
+
+```bash
+awx job_templates associate 'My Job' --credential 'SSH Key'
+```
+
+Associate notification templates:
+
+```bash
+awx job_templates associate 'My Job' --start_notification 'Slack'
+awx job_templates associate 'My Job' --success_notification 'Email'
+```
+
+### Disassociating Resources
+
+```bash
+awx job_templates disassociate 'My Job' --credential 'SSH Key'
+```
+
+### Granting and Revoking Permissions
+
+Grant roles to users:
+
+```bash
+awx users grant alice --project 'My Project' --role admin
+awx users grant bob --organization 'Engineering' --role member
+```
+
+Revoke roles:
+
+```bash
+awx users revoke alice --project 'My Project' --role admin
+```
+
+Grant roles to teams:
+
+```bash
+awx teams grant 'DevOps' --job_template 'Deploy' --role execute
+```
+
+## Bulk Operations
+
+### Bulk Host Creation
+
+```bash
+awx bulk host_create --inventory 'Production' \
+    --hosts '[{"name": "web1"}, {"name": "web2"}, {"name": "web3"}]'
+```
+
+### Bulk Host Deletion
+
+```bash
+awx bulk host_delete --hosts '[{"name": "web1"}, {"name": "web2"}]'
+```
+
+### Bulk Job Launch
+
+```bash
+awx bulk job_launch \
+    --jobs '[{"unified_job_template": 1}, {"unified_job_template": 2}]' \
+    --monitor
+```
+
+## Import/Export
+
+### Exporting Resources
+
+Export all resources:
+
+```bash
+awx export > backup.json
+```
+
+Export specific resource types:
+
+```bash
+awx export --users --organizations > config.json
+```
+
+Export specific resources by name:
+
+```bash
+awx export --users alice --users bob > users.json
+```
+
+Export by ID:
+
+```bash
+awx export --job_templates 42 > template.json
+```
+
+Export in YAML format:
+
+```bash
+awx export -f yaml > backup.yml
+```
+
+### Importing Resources
+
+Import from JSON:
+
+```bash
+awx import < backup.json
+```
+
+Import from YAML:
+
+```bash
+awx import -f yaml < backup.yml
+```
+
+## Configuration Commands
+
+### View Current Configuration
+
+```bash
+awx config
+```
+
+Output:
+```json
+{
+  "base_url": "https://awx.example.org",
+  "use_sessions": true,
+  "credentials": {
+    "default": {
+      "username": "alice",
+      "password": "***"
+    }
+  }
+}
+```
+
+### View System Settings
+
+```bash
+awx settings list
+```
+
+View specific setting category:
+
+```bash
+awx settings list --slug auth
+awx settings list --slug jobs
+```
+
+### Modify Settings
+
+```bash
+awx settings modify SESSION_COOKIE_AGE 3600
+awx settings modify REMOTE_HOST_HEADERS '["HTTP_X_FORWARDED_FOR"]'
+```
+
+## Control Resources
+
+Some resources provide metadata or system information:
+
+### Ping
+
+Check API connectivity:
+
+```bash
+awx ping
+```
+
+### Config
+
+View AWX configuration:
+
+```bash
+awx config
+```
+
+### Me
+
+View current user information:
+
+```bash
+awx me list
+```
+
+### Metrics
+
+View system metrics:
+
+```bash
+awx metrics list
+awx metrics list -f human
+```
+
+## Working with Ad Hoc Commands
+
+Run ad hoc commands:
+
+```bash
+awx ad_hoc_commands create \
+    --inventory 'Demo Inventory' \
+    --credential 'Demo Credential' \
+    --module_name ping \
+    --limit 'web*' \
+    --monitor
+
+awx ad_hoc_commands create \
+    --inventory 'Demo Inventory' \
+    --credential 'Demo Credential' \
+    --module_name shell \
+    --module_args 'uptime' \
+    --limit 'all' \
+    --monitor
+```
+
+## Output Formatting Examples
+
+### JSON Output (Default)
+
+```bash
+awx users list
+```
+
+### Human-Readable Tables
+
+```bash
+awx jobs list -f human --filter 'id,name,status,created'
+```
+
+### YAML Output
+
+```bash
+awx projects get 'My Project' -f yaml
+```
+
+### JQ Filtering
+
+```bash
+# Extract specific fields
+awx users list -f jq --filter '.results[] | {id, username}'
+
+# Filter by condition
+awx jobs list -f jq --filter '.results[] | select(.status == "successful")'
+```
+
+### All Fields
+
+```bash
+awx users list -f human --filter '*'
+```
+
+## Practical Examples
+
+### Create a Complete Job Template
+
+```bash
+# Create organization
+awx organizations create --name 'Engineering'
+
+# Create project
+awx projects create --wait \
+    --organization 'Engineering' \
+    --name 'Web App' \
+    --scm_type git \
+    --scm_url 'https://github.com/example/webapp.git'
+
+# Create inventory
+awx inventories create \
+    --organization 'Engineering' \
+    --name 'Production'
+
+# Add hosts
+awx hosts create \
+    --inventory 'Production' \
+    --name 'web1.example.com'
+
+# Create credential
+awx credentials create \
+    --name 'SSH Key' \
+    --credential_type 'Machine' \
+    --inputs '{"username": "ansible", "ssh_key_data": "@~/.ssh/id_rsa"}'
+
+# Create job template
+awx job_templates create \
+    --name 'Deploy Web App' \
+    --project 'Web App' \
+    --playbook 'deploy.yml' \
+    --inventory 'Production'
+
+# Associate credential
+awx job_templates associate 'Deploy Web App' --credential 'SSH Key'
+
+# Launch job
+awx job_templates launch 'Deploy Web App' --monitor
+```
+
+### Monitor Job History
+
+```bash
+# View recent jobs
+awx jobs list --all --order_by '-created' \
+    -f human --filter 'id,name,status,created'
+
+# View jobs for specific template
+awx jobs list --job_template 'Deploy Web App' \
+    -f human --filter 'id,status,created'
+
+# View failed jobs
+awx jobs list --status failed \
+    -f human --filter 'id,name,created,started,finished'
+```
+
+### Backup and Restore
+
+```bash
+# Backup all configuration
+awx export > awx-backup-$(date +%Y%m%d).json
+
+# Backup specific resources
+awx export --users --organizations --teams > rbac-backup.json
+
+# Restore from backup
+awx import < awx-backup-20260304.json
+```
+
+## Tips and Best Practices
+
+1. **Use `--help` liberally** - Every resource and action has detailed help
+2. **Use names instead of IDs** - More readable and maintainable
+3. **Use `--all` for listings** - Ensures you get all results, not just first page
+4. **Use `-f human` for exploration** - Easier to read during development
+5. **Use `-f json` for automation** - Consistent, parseable output
+6. **Use `--monitor` during development** - See job output in real-time
+7. **Use `--wait` in scripts** - Ensures jobs complete before continuing
+8. **Store credentials in environment** - More secure than command-line flags
+9. **Use `@file` for large data** - Cleaner than inline JSON
+10. **Enable verbose mode for debugging** - `awx -v` shows HTTP requests
+
+## Getting Help
+
+```bash
+# General help
+awx --help
+
+# Resource help
+awx users --help
+
+# Action help
+awx users create --help
+
+# Version information
+awx --version
+```

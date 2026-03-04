@@ -1,0 +1,544 @@
+---
+title: 'AWX Operator Installation'
+description: 'Install AWX on Kubernetes or OpenShift using the AWX Operator'
+keywords: ['awx', 'operator', 'kubernetes', 'k8s', 'openshift', 'production']
+icon: 'kubernetes'
+---
+
+Starting in version 18.0, the [AWX Operator](https://github.com/ansible/awx-operator) is the **preferred and recommended way to install AWX**. The operator provides automated deployment, configuration, and lifecycle management for AWX on Kubernetes and OpenShift platforms.
+
+<Check>
+  The AWX Operator is designed for production deployments and provides enterprise-grade reliability, scalability, and high availability.
+</Check>
+
+## Overview
+
+The AWX Operator is a Kubernetes operator that manages the complete lifecycle of AWX deployments. It handles:
+
+- **Automated Deployment**: Deploys all AWX components as Kubernetes resources
+- **Configuration Management**: Manages AWX configuration through Kubernetes Custom Resources
+- **Upgrades**: Automates AWX upgrades with minimal downtime
+- **Scaling**: Supports horizontal scaling of AWX components
+- **High Availability**: Enables multi-replica deployments for reliability
+- **Backup & Restore**: Provides mechanisms for data backup and recovery
+
+## Prerequisites
+
+Before installing the AWX Operator, ensure you have:
+
+<AccordionGroup>
+  <Accordion title="Kubernetes or OpenShift Cluster">
+    A running Kubernetes (1.21+) or OpenShift cluster with:
+    - Sufficient resources for AWX components (minimum 4GB RAM, 2 CPU cores)
+    - A storage class for persistent volumes
+    - Network access to container registries
+    - LoadBalancer or Ingress capability for external access
+  </Accordion>
+  
+  <Accordion title="kubectl or oc CLI">
+    The Kubernetes command-line tool (`kubectl`) or OpenShift CLI (`oc`) installed and configured to access your cluster.
+    
+    ```bash
+    # Verify cluster access
+    kubectl cluster-info
+    
+    # Or for OpenShift
+    oc cluster-info
+    ```
+  </Accordion>
+  
+  <Accordion title="Cluster Admin Permissions">
+    Administrator-level permissions on the cluster to:
+    - Create namespaces
+    - Install Custom Resource Definitions (CRDs)
+    - Create RBAC roles and bindings
+    - Deploy the operator
+  </Accordion>
+  
+  <Accordion title="Kustomize (Optional)">
+    [Kustomize](https://kustomize.io/) for customizing Kubernetes manifests. Kustomize is built into `kubectl` version 1.14 and later.
+  </Accordion>
+</AccordionGroup>
+
+## Installation Methods
+
+The AWX Operator can be installed using multiple methods. Choose the one that best fits your environment:
+
+<Tabs>
+  <Tab title="Kustomize (Recommended)">
+    ### Install using Kustomize
+    
+    This is the most flexible installation method and is recommended for most users.
+    
+    <Steps>
+      <Step title="Create namespace">
+        Create a dedicated namespace for the AWX Operator:
+        
+        ```bash
+        kubectl create namespace awx
+        ```
+      </Step>
+      
+      <Step title="Create kustomization file">
+        Create a `kustomization.yaml` file:
+        
+        ```yaml kustomization.yaml
+        apiVersion: kustomize.config.k8s.io/v1beta1
+        kind: Kustomization
+        
+        namespace: awx
+        
+        resources:
+          # Find the latest release tag from:
+          # https://github.com/ansible/awx-operator/releases
+          - github.com/ansible/awx-operator/config/default?ref=2.19.1
+        
+        # Set the image tags to match the release version
+        images:
+          - name: quay.io/ansible/awx-operator
+            newTag: 2.19.1
+        ```
+        
+        <Note>
+          Replace `2.19.1` with the latest stable release version from the [AWX Operator releases page](https://github.com/ansible/awx-operator/releases).
+        </Note>
+      </Step>
+      
+      <Step title="Deploy the operator">
+        Apply the kustomization to deploy the operator:
+        
+        ```bash
+        kubectl apply -k .
+        ```
+        
+        Verify the operator is running:
+        
+        ```bash
+        kubectl get pods -n awx
+        ```
+        
+        You should see the operator pod in a `Running` state:
+        
+        ```
+        NAME                                               READY   STATUS    RESTARTS   AGE
+        awx-operator-controller-manager-68d787cfbd-kjfg7   2/2     Running   0          30s
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+  
+  <Tab title="Operator Lifecycle Manager">
+    ### Install using OLM
+    
+    If your cluster has [Operator Lifecycle Manager (OLM)](https://olm.operatorframework.io/) installed, you can install the AWX Operator from OperatorHub.
+    
+    <Steps>
+      <Step title="Access OperatorHub">
+        In the OpenShift web console or Kubernetes dashboard, navigate to OperatorHub.
+      </Step>
+      
+      <Step title="Search for AWX Operator">
+        Search for "AWX" in the operator catalog and select the AWX Operator.
+      </Step>
+      
+      <Step title="Install the operator">
+        Click "Install" and follow the prompts to:
+        - Select the installation namespace
+        - Choose the update approval strategy
+        - Confirm the installation
+      </Step>
+      
+      <Step title="Verify installation">
+        Check that the operator is installed and running:
+        
+        ```bash
+        kubectl get csv -n operators
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+  
+  <Tab title="Helm Chart">
+    ### Install using Helm
+    
+    If you prefer using Helm for package management:
+    
+    <Steps>
+      <Step title="Add the Helm repository">
+        ```bash
+        helm repo add awx-operator https://ansible.github.io/awx-operator/
+        helm repo update
+        ```
+      </Step>
+      
+      <Step title="Install the chart">
+        ```bash
+        helm install awx-operator awx-operator/awx-operator \
+          --namespace awx \
+          --create-namespace
+        ```
+      </Step>
+      
+      <Step title="Verify installation">
+        ```bash
+        helm list -n awx
+        kubectl get pods -n awx
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Deploying AWX
+
+Once the operator is installed, you can deploy an AWX instance:
+
+<Steps>
+  <Step title="Create AWX custom resource">
+    Create a file named `awx-instance.yaml` with your AWX configuration:
+    
+    ```yaml awx-instance.yaml
+    apiVersion: awx.ansible.com/v1beta1
+    kind: AWX
+    metadata:
+      name: awx
+      namespace: awx
+    spec:
+      service_type: LoadBalancer
+      # Optional: Specify AWX version
+      # image_version: "24.6.1"
+      
+      # Ingress configuration (if using Ingress instead of LoadBalancer)
+      # ingress_type: Ingress
+      # hostname: awx.example.com
+    ```
+    
+    <Tip>
+      Customize the AWX deployment by adding additional spec fields. See the [AWX Operator documentation](https://ansible.readthedocs.io/projects/awx-operator/en/latest/) for all available options.
+    </Tip>
+  </Step>
+  
+  <Step title="Deploy AWX">
+    Apply the custom resource:
+    
+    ```bash
+    kubectl apply -f awx-instance.yaml
+    ```
+    
+    The operator will begin deploying AWX components.
+  </Step>
+  
+  <Step title="Monitor the deployment">
+    Watch the deployment progress:
+    
+    ```bash
+    # Watch AWX pods
+    kubectl get pods -n awx -w
+    
+    # Check AWX resource status
+    kubectl get awx -n awx
+    
+    # View operator logs
+    kubectl logs -f deployment/awx-operator-controller-manager \
+      -c awx-manager -n awx
+    ```
+    
+    The deployment typically takes 5-10 minutes. You'll see pods for:
+    - PostgreSQL database
+    - AWX web interface
+    - AWX task executor
+    - Redis cache
+  </Step>
+  
+  <Step title="Retrieve admin password">
+    Once deployment is complete, retrieve the admin password:
+    
+    ```bash
+    kubectl get secret awx-admin-password -n awx \
+      -o jsonpath="{.data.password}" | base64 --decode
+    ```
+    
+    The default admin username is `admin`.
+  </Step>
+</Steps>
+
+## Accessing AWX
+
+After deployment, access the AWX web interface:
+
+<Tabs>
+  <Tab title="LoadBalancer">
+    If you configured `service_type: LoadBalancer`:
+    
+    ```bash
+    # Get the external IP
+    kubectl get svc awx-service -n awx
+    ```
+    
+    Access AWX at `http://<EXTERNAL-IP>` in your browser.
+  </Tab>
+  
+  <Tab title="Ingress">
+    If you configured an Ingress:
+    
+    ```bash
+    # Check Ingress configuration
+    kubectl get ingress -n awx
+    ```
+    
+    Access AWX at the configured hostname (e.g., `https://awx.example.com`).
+  </Tab>
+  
+  <Tab title="Port Forward">
+    For testing or local access:
+    
+    ```bash
+    kubectl port-forward svc/awx-service -n awx 8080:80
+    ```
+    
+    Access AWX at `http://localhost:8080` in your browser.
+  </Tab>
+</Tabs>
+
+## Configuration Options
+
+The AWX Operator supports extensive configuration through the AWX custom resource spec:
+
+<AccordionGroup>
+  <Accordion title="Resource Requirements">
+    Configure CPU and memory limits:
+    
+    ```yaml
+    spec:
+      web_resource_requirements:
+        requests:
+          cpu: 1000m
+          memory: 2Gi
+        limits:
+          cpu: 2000m
+          memory: 4Gi
+      task_resource_requirements:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+    ```
+  </Accordion>
+  
+  <Accordion title="Storage Configuration">
+    Configure persistent storage:
+    
+    ```yaml
+    spec:
+      postgres_storage_class: fast-ssd
+      postgres_storage_requirements:
+        requests:
+          storage: 20Gi
+      projects_persistence: true
+      projects_storage_class: standard
+      projects_storage_size: 10Gi
+    ```
+  </Accordion>
+  
+  <Accordion title="External Database">
+    Use an external PostgreSQL database:
+    
+    ```yaml
+    spec:
+      postgres_configuration_secret: awx-postgres-configuration
+    ```
+    
+    Create the secret:
+    
+    ```bash
+    kubectl create secret generic awx-postgres-configuration \
+      --from-literal=host=postgres.example.com \
+      --from-literal=port=5432 \
+      --from-literal=database=awx \
+      --from-literal=username=awx \
+      --from-literal=password=<password> \
+      --from-literal=type=managed \
+      -n awx
+    ```
+  </Accordion>
+  
+  <Accordion title="Custom Images">
+    Use custom AWX or Redis images:
+    
+    ```yaml
+    spec:
+      image: quay.io/ansible/awx
+      image_version: "24.6.1"
+      redis_image: redis:7-alpine
+    ```
+  </Accordion>
+  
+  <Accordion title="Replicas and Scaling">
+    Configure multiple replicas for high availability:
+    
+    ```yaml
+    spec:
+      replicas: 3
+      web_replicas: 2
+      task_replicas: 2
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Upgrading AWX
+
+To upgrade AWX to a new version:
+
+<Steps>
+  <Step title="Update operator">
+    First, upgrade the AWX Operator to a compatible version by updating your kustomization or Helm chart.
+  </Step>
+  
+  <Step title="Update AWX version">
+    Modify your AWX custom resource to specify the new version:
+    
+    ```yaml
+    spec:
+      image_version: "24.6.1"  # New version
+    ```
+  </Step>
+  
+  <Step title="Apply changes">
+    Apply the updated configuration:
+    
+    ```bash
+    kubectl apply -f awx-instance.yaml
+    ```
+    
+    The operator will perform a rolling upgrade with minimal downtime.
+  </Step>
+  
+  <Step title="Monitor upgrade">
+    Watch the upgrade process:
+    
+    ```bash
+    kubectl get pods -n awx -w
+    kubectl logs -f deployment/awx-operator-controller-manager \
+      -c awx-manager -n awx
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Always review the [release notes](https://github.com/ansible/awx/releases) before upgrading to understand breaking changes and migration requirements.
+</Warning>
+
+## Backup and Restore
+
+The AWX Operator provides built-in backup and restore capabilities:
+
+### Creating a Backup
+
+```yaml awxbackup.yaml
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXBackup
+metadata:
+  name: awx-backup-$(date +%Y%m%d)
+  namespace: awx
+spec:
+  deployment_name: awx
+```
+
+Apply the backup:
+
+```bash
+kubectl apply -f awxbackup.yaml
+```
+
+### Restoring from Backup
+
+```yaml awxrestore.yaml
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXRestore
+metadata:
+  name: awx-restore
+  namespace: awx
+spec:
+  deployment_name: awx
+  backup_name: awx-backup-20240101
+```
+
+Apply the restore:
+
+```bash
+kubectl apply -f awxrestore.yaml
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Operator pod not starting">
+    Check operator logs:
+    
+    ```bash
+    kubectl logs -n awx deployment/awx-operator-controller-manager
+    ```
+    
+    Common issues:
+    - Insufficient RBAC permissions
+    - Resource constraints
+    - CRD installation failures
+  </Accordion>
+  
+  <Accordion title="AWX pods in pending state">
+    Check resource availability:
+    
+    ```bash
+    kubectl describe pod <pod-name> -n awx
+    ```
+    
+    Common causes:
+    - Insufficient cluster resources
+    - Storage provisioning issues
+    - Image pull failures
+  </Accordion>
+  
+  <Accordion title="Database connection issues">
+    Verify PostgreSQL pod and service:
+    
+    ```bash
+    kubectl get pods -n awx -l app.kubernetes.io/name=postgres
+    kubectl logs -n awx <postgres-pod-name>
+    ```
+    
+    Check database credentials in secrets:
+    
+    ```bash
+    kubectl get secret awx-postgres-configuration -n awx -o yaml
+    ```
+  </Accordion>
+  
+  <Accordion title="Cannot access AWX web interface">
+    Verify service and ingress configuration:
+    
+    ```bash
+    kubectl get svc -n awx
+    kubectl get ingress -n awx
+    ```
+    
+    Check AWX pod logs:
+    
+    ```bash
+    kubectl logs -n awx -l app.kubernetes.io/name=awx-web
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Additional Resources
+
+- [AWX Operator GitHub Repository](https://github.com/ansible/awx-operator)
+- [AWX Operator Documentation](https://ansible.readthedocs.io/projects/awx-operator/)
+- [AWX Operator Examples](https://github.com/ansible/awx-operator/tree/devel/docs)
+- [Kubernetes Documentation](https://kubernetes.io/docs/)
+- [OpenShift Documentation](https://docs.openshift.com/)
+
+<Note>
+  For the most up-to-date installation instructions and configuration options, always refer to the official [AWX Operator documentation](https://ansible.readthedocs.io/projects/awx-operator/en/latest/).
+</Note>

@@ -1,0 +1,986 @@
+---
+title: 'AWX Architecture'
+description: 'Deep dive into AWX architecture, components, and internal systems including Django backend, React frontend, task engine, and distributed execution'
+---
+
+# AWX Architecture
+
+AWX is built on a modern, scalable architecture combining web technologies, message queuing, distributed task execution, and container orchestration. This guide provides a comprehensive look at how AWX works internally.
+
+## High-Level Architecture
+
+AWX consists of several interconnected components:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         Client Layer                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐   │
+│  │   Web UI     │  │   REST API   │  │   AWX CLI       │   │
+│  │  (React)     │  │   Clients    │  │   (awxkit)      │   │
+│  └──────────────┘  └──────────────┘  └─────────────────┘   │
+└────────────────────────┬────────────────────────────────────┘
+                         │ HTTPS / WebSocket
+┌────────────────────────▼────────────────────────────────────┐
+│                    AWX Web Nodes                            │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  Django Web Application                             │    │
+│  │  - REST API (Django REST Framework)                 │    │
+│  │  - Authentication & RBAC                            │    │
+│  │  - WebSocket handlers (Channels/Daphne)            │    │
+│  └─────────────────────────────────────────────────────┘    │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+        ┌────────────────┴────────────────┐
+        │                                 │
+┌───────▼─────────┐            ┌──────────▼────────┐
+│   PostgreSQL    │            │   Redis           │
+│   Database      │            │   - Cache         │
+│                 │            │   - Broker        │
+└───────┬─────────┘            └──────────┬────────┘
+        │                                 │
+┌───────▼─────────────────────────────────▼───────────────────┐
+│                    AWX Task Nodes                           │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  Dispatcher (Task Engine)                           │    │
+│  │  - Task Manager                                     │    │
+│  │  - Job Scheduler                                    │    │
+│  │  - Callback Receiver                                │    │
+│  └─────────────────────────────────────────────────────┘    │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         │ Receptor Mesh Network
+                         │
+┌────────────────────────▼────────────────────────────────────┐
+│                 Execution Nodes                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  ansible-runner                                      │   │
+│  │  - Playbook execution in containers/virtual envs    │   │
+│  │  - Event callbacks to AWX                           │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Core Components
+
+### Django Backend
+
+AWX's backend is built on Django 4.x with Django REST Framework, providing the web framework, ORM, and API layer.
+
+#### Key Modules
+
+<Tabs>
+  <Tab title="Models (awx/main/models/)">
+    AWX's data models define the core domain objects:
+    
+    ```python
+    # From awx/main/models/__init__.py
+    from awx.main.models.organization import Organization, Team
+    from awx.main.models.credential import Credential, CredentialType
+    from awx.main.models.projects import Project, ProjectUpdate
+    from awx.main.models.inventory import Inventory, Host, Group
+    from awx.main.models.jobs import Job, JobTemplate
+    from awx.main.models.workflow import WorkflowJob, WorkflowJobTemplate
+    from awx.main.models.schedules import Schedule
+    ```
+    
+    **Key model hierarchies:**
+    - `UnifiedJobTemplate` → `JobTemplate`, `ProjectUpdate`, `InventoryUpdate`
+    - `UnifiedJob` → `Job`, `ProjectUpdate`, `InventoryUpdate`, `WorkflowJob`
+    - Both use polymorphic inheritance for shared behavior
+  </Tab>
+  
+  <Tab title="API (awx/api/)">
+    REST API layer built with Django REST Framework:
+    
+    - **Serializers** (`awx/api/serializers.py`): Transform models to/from JSON
+    - **Views**: ViewSets providing CRUD operations on resources
+    - **Permissions** (`awx/api/permissions.py`): RBAC enforcement
+    - **URL routing** (`awx/api/urls/`): API endpoint definitions
+    
+    The API follows REST best practices with hypermedia links (HATEOAS).
+  </Tab>
+  
+  <Tab title="Settings (awx/conf/)">
+    Dynamic configuration system from `awx/conf/settings.py`:
+    
+    ```python
+    class SettingsWrapper(UserSettingsHolder):
+        """Wraps Django settings with database-backed configuration."""
+        
+        def _get_local(self, name, validate=True):
+            # Fetch setting from cache or database
+            cache_key = Setting.get_cache_key(name)
+            cache_value = self.cache.get(cache_key, default=empty)
+            # ...
+    ```
+    
+    Settings are cached in Redis with TTL, encrypted for sensitive values, and validated on read/write.
+  </Tab>
+</Tabs>
+
+#### Database Schema
+
+AWX uses PostgreSQL with several key design patterns:
+
+<Accordion title="Partitioned Event Tables">
+  Job events are stored in partitioned tables for performance:
+  
+  - `main_jobevent` - Parent table
+  - `main_jobevent_*` - Monthly partitions (e.g., `main_jobevent_202403`)
+  
+  From `awx/main/models/events.py`:
+  
+  ```python
+  class JobEvent(UnpartitionedJobEvent):
+      """Job event records are stored in monthly partitions."""
+      class Meta:
+          db_table = 'main_jobevent'
+          # Partitioning configured via migrations
+  ```
+  
+  Partitioning enables efficient retention policies and query performance.
+</Accordion>
+
+<Accordion title="Polymorphic Tables">
+  Unified jobs use polymorphic inheritance via django-polymorphic:
+  
+  ```python
+  class UnifiedJob(PolymorphicModel, CommonModelNameNotUnique):
+      """Base class for all job types."""
+      polymorphic_ctype = models.ForeignKey(
+          ContentType, on_delete=models.CASCADE
+      )
+  ```
+  
+  Single table with a type discriminator allows querying across all job types.
+</Accordion>
+
+<Accordion title="RBAC Tables">
+  AWX uses django-ansible-base for RBAC:
+  
+  - `main_roledefinition` - Role definitions (e.g., "Admin", "Execute")
+  - `main_roleuserassignment` - User assignments to roles on objects
+  - `main_roleevaluation` - Cached permission evaluations
+  
+  Supports object-level permissions with inheritance.
+</Accordion>
+
+### React Frontend (ansible-ui)
+
+The AWX UI is built with React and the ansible-ui framework.
+
+<CardGroup cols={2}>
+  <Card title="Location" icon="folder">
+    Source: `awx/ui/`
+    
+    The UI is built separately and static files are served by Django via `collectstatic`.
+  </Card>
+  
+  <Card title="Build Process" icon="hammer">
+    ```bash
+    # From awx/ui/README.md
+    export UI_GIT_REPO=https://github.com/ansible/ansible-ui
+    export UI_GIT_BRANCH=main
+    make ui
+    ```
+    
+    Builds static assets deployed to `awx/ui/build/static/`.
+  </Card>
+</CardGroup>
+
+**Key Frontend Features:**
+
+- **Real-time updates**: WebSocket connection for job output streaming
+- **PatternFly components**: Consistent Red Hat design language
+- **React Router**: Client-side routing
+- **API integration**: Axios-based HTTP client communicating with Django REST API
+
+### PostgreSQL Database
+
+The PostgreSQL database stores all AWX state:
+
+<Tabs>
+  <Tab title="Tables">
+    - **Organizations, Teams, Users**: `main_organization`, `main_team`, `auth_user`
+    - **Credentials**: `main_credential`, `main_credentialtype`
+    - **Inventories**: `main_inventory`, `main_host`, `main_group`
+    - **Projects**: `main_project`, `main_projectupdate`
+    - **Jobs**: `main_job`, `main_jobtemplate`, `main_unifiedjob`
+    - **Events**: `main_jobevent` (partitioned), `main_inventoryupdateevent`
+    - **Schedules**: `main_schedule`
+    - **Notifications**: `main_notification`, `main_notificationtemplate`
+    - **RBAC**: `main_roledefinition`, `main_roleuserassignment`
+  </Tab>
+  
+  <Tab title="Connection Pooling">
+    AWX uses multiple database connection pools:
+    
+    ```python
+    # From awx/settings/defaults.py
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'ATOMIC_REQUESTS': True,
+            # Connection pooling via pgbouncer or Django
+        }
+    }
+    
+    LISTENER_DATABASES = {
+        'default': {
+            'OPTIONS': {
+                'keepalives': 1,
+                'keepalives_idle': 5,
+            },
+        }
+    }
+    ```
+    
+    Separate pools for transactional vs. pg_notify listeners.
+  </Tab>
+  
+  <Tab title="Migrations">
+    Schema migrations managed via Django migrations:
+    
+    ```bash
+    # In AWX container
+    awx-manage migrate
+    
+    # Check migration status
+    awx-manage showmigrations
+    ```
+    
+    Migrations handle schema evolution, data transforms, and partitioning.
+  </Tab>
+</Tabs>
+
+### Redis
+
+Redis provides caching and message brokering:
+
+<Info>
+  **Redis Usage:**
+  - Settings cache (TTL: 60 seconds)
+  - Django session storage
+  - Django Channels layer for WebSockets
+  - Dispatcher job queue (via dispatcherd)
+</Info>
+
+```python
+# From awx/conf/settings.py
+class EncryptedCacheProxy(object):
+    """Proxy wrapping Redis cache with encryption for sensitive values."""
+    
+    def get(self, key, **kwargs):
+        value = self.cache.get(key, **kwargs)
+        value = self._handle_encryption(self.decrypter, key, value)
+        return value
+    
+    def set(self, key, value, **kwargs):
+        self.cache.set(
+            key,
+            self._handle_encryption(self.encrypter, key, value),
+            **kwargs
+        )
+```
+
+Encrypted cache ensures sensitive settings are protected at rest.
+
+## Task Execution Engine
+
+The task execution engine is AWX's core: the system that schedules, dispatches, and executes automation jobs.
+
+### Dispatcher (awx/main/dispatch/)
+
+AWX uses a custom task queue system called "dispatcher" (replacing the older Celery-based approach):
+
+```python
+# From awx/main/dispatch/worker/task.py
+def resolve_callable(task):
+    """Transform dotted notation task into callable function.
+    
+    Examples:
+        awx.main.tasks.system.delete_inventory
+        awx.main.tasks.jobs.RunJob
+    """
+    if not task.startswith('awx.'):
+        raise ValueError(f'{task} is not a valid awx task')
+    module, target = task.rsplit('.', 1)
+    module = importlib.import_module(module)
+    _call = getattr(module, target, None)
+    return _call
+
+def run_callable(body):
+    """Execute task with args/kwargs from AMQP message."""
+    task = body['task']
+    args = body.get('args', [])
+    kwargs = body.get('kwargs', {})
+    _call = resolve_callable(task)
+    return _call(*args, **kwargs)
+```
+
+<Accordion title="Dispatcher Architecture">
+  **Components** (from `awx/main/dispatch/`):
+  
+  - **Pool** (`pool.py`): Worker process pool management
+  - **Reaper** (`reaper.py`): Cleanup of orphaned processes
+  - **Worker** (`worker/`): Worker process implementations
+    - `task.py` - Task execution worker
+    - `callback.py` - Job event callback receiver
+    - `dispatcherd.py` - Dispatcher daemon
+  
+  **Message Flow:**
+  1. Task published to Redis queue
+  2. Dispatcher daemon polls queue
+  3. Worker process consumes message
+  4. Task callable executed
+  5. Result stored (if applicable)
+</Accordion>
+
+### Task Manager
+
+The task manager decides which jobs run when and where:
+
+```python
+# From awx/main/models/unified_jobs.py
+class TaskManagerUnifiedJobMixin:
+    """Mixin providing task manager integration for jobs."""
+    
+    def start_job(self, **kwargs):
+        """Called by task manager to start job execution."""
+        # Transitions job from 'pending' -> 'waiting' -> 'running'
+        # Dispatches to execution node via Receptor
+```
+
+**Task Manager Responsibilities:**
+
+<Steps>
+  <Step title="Capacity Management">
+    Ensures nodes don't exceed capacity limits (forks * concurrent jobs).
+  </Step>
+  
+  <Step title="Dependency Resolution">
+    Jobs blocked by dependencies (e.g., project updates) wait until unblocked.
+  </Step>
+  
+  <Step title="Instance Group Selection">
+    Chooses which instance group (control plane, execution nodes, container groups) should run the job.
+  </Step>
+  
+  <Step title="Job Dispatching">
+    Sends job to selected execution node via Receptor.
+  </Step>
+</Steps>
+
+### Receptor Mesh Network
+
+Receptor provides the communication layer between AWX control plane and execution nodes.
+
+```
+                    ┌─────────────────┐
+                    │  AWX Control    │
+                    │     Plane       │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┴──────────────┐
+              │                             │
+      ┌───────▼────────┐            ┌──────▼───────┐
+      │  Receptor Hop  │            │  Execution   │
+      │     Node       │            │    Node 1    │
+      └───────┬────────┘            └──────────────┘
+              │
+      ┌───────┴────────┐
+      │   Execution    │
+      │     Node 2     │
+      └────────────────┘
+```
+
+<Tabs>
+  <Tab title="Purpose">
+    - **Secure mesh networking**: Encrypted connections between nodes
+    - **Job routing**: Routes work units to appropriate execution nodes
+    - **Bidirectional communication**: Callback events from nodes to control plane
+    - **Flexible topologies**: Direct connections, hop nodes, peered networks
+  </Tab>
+  
+  <Tab title="Configuration">
+    Receptor addresses configured via `ReceptorAddress` model:
+    
+    ```python
+    # From awx/main/models/receptor_address.py
+    class ReceptorAddress(models.Model):
+        """Maps instances to Receptor network addresses."""
+        address = models.CharField(max_length=1024)
+        port = models.IntegerField()
+        protocol = models.CharField(
+            choices=[('tcp', 'TCP'), ('ws', 'WebSocket')]
+        )
+        instance = models.ForeignKey('Instance')
+    ```
+  </Tab>
+  
+  <Tab title="Work Units">
+    Jobs are submitted as Receptor "work units":
+    
+    ```python
+    # Simplified from awx/main/tasks/receptor.py
+    def submit_work_to_receptor(job):
+        work_unit = {
+            'command': 'work',
+            'node': target_node,
+            'work_type': 'ansible-runner',
+            'payload': job_args,
+        }
+        receptor_client.submit(work_unit)
+    ```
+  </Tab>
+</Tabs>
+
+### ansible-runner
+
+Jobs execute via the [ansible-runner](https://github.com/ansible/ansible-runner) library:
+
+```python
+# Conceptual example (simplified from actual implementation)
+import ansible_runner
+
+def run_job(job_id, playbook, inventory, credentials):
+    """Execute Ansible playbook via ansible-runner."""
+    
+    runner_config = {
+        'private_data_dir': f'/tmp/awx_{job_id}',
+        'playbook': playbook,
+        'inventory': inventory,
+        'extravars': job.extra_vars,
+        'envvars': build_safe_env(credentials),
+    }
+    
+    # Run in execution environment (container)
+    if job.execution_environment:
+        runner_config['container_image'] = job.execution_environment.image
+        runner_config['process_isolation'] = True
+    
+    # Execute with streaming events
+    runner = ansible_runner.run(
+        **runner_config,
+        event_handler=send_event_to_awx,
+        status_handler=send_status_to_awx,
+    )
+    
+    return runner.status, runner.rc
+```
+
+<Info>
+  **Execution Environments**: Container images (Podman/Docker) with Ansible + dependencies. Provides isolation, reproducibility, and version control for automation environments.
+</Info>
+
+## Job Lifecycle
+
+Complete flow from job launch to completion:
+
+<Steps>
+  <Step title="Job Created (status: new)">
+    User clicks Launch or API receives POST to `/api/v2/job_templates/{id}/launch/`
+    
+    - Job record created in database
+    - Status: `new`
+    - Job placed in task manager queue
+  </Step>
+  
+  <Step title="Task Manager Evaluation (status: pending)">
+    Task manager periodically evaluates pending jobs:
+    
+    ```python
+    # From awx/main/models/unified_jobs.py  
+    class UnifiedJob(PolymorphicModel):
+        JOB_STATUS_CHOICES = [
+            ('new', 'New'),
+            ('pending', 'Pending'),  # Blocked or waiting for capacity
+            ('waiting', 'Waiting'),  # Assigned, about to run
+            ('running', 'Running'),
+            # ...
+        ]
+    ```
+    
+    Checks:
+    - Capacity available on execution nodes?
+    - Dependencies satisfied (e.g., project synced)?
+    - Concurrent job limits not exceeded?
+  </Step>
+  
+  <Step title="Job Dispatch (status: waiting → running)">
+    Once resources available:
+    
+    - Job status → `waiting`
+    - Task manager selects execution node (or container group)
+    - Work unit submitted to Receptor
+    - Execution node receives work unit
+    - ansible-runner starts playbook execution
+    - Job status → `running`
+  </Step>
+  
+  <Step title="Event Streaming">
+    During execution:
+    
+    - ansible-runner emits events (task started, task completed, etc.)
+    - Events sent to AWX via callback plugin
+    - Stored in `main_jobevent` partitioned table
+    - Broadcast to UI clients via WebSocket (Django Channels)
+    - UI displays real-time output
+  </Step>
+  
+  <Step title="Job Completion (status: successful/failed/error)">
+    When playbook finishes:
+    
+    - Final status based on Ansible return code
+    - Job stats calculated (ok, changed, failed, skipped counts)
+    - Notifications triggered (if configured)
+    - Workflow successors evaluated (if part of workflow)
+    - Job status → `successful`, `failed`, or `error`
+  </Step>
+</Steps>
+
+## WebSocket Real-Time Updates
+
+AWX uses Django Channels for WebSocket support:
+
+```python
+# From awx/asgi.py
+import os
+from channels.routing import ProtocolTypeRouter, URLRouter
+from django.core.asgi import get_asgi_application
+
+application = ProtocolTypeRouter({
+    "http": get_asgi_application(),
+    "websocket": URLRouter([
+        # WebSocket routes for job events, etc.
+    ]),
+})
+```
+
+**WebSocket Flow:**
+
+1. UI connects to `wss://awx/websocket/`
+2. Subscribes to job channel: `jobs-<job_id>`
+3. Job events published to channel via `emit_channel_notification()`:
+
+```python
+# From awx/main/consumers.py
+def emit_channel_notification(group_name, data):
+    """Publish notification to WebSocket channel group."""
+    channel_layer = channels.layers.get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        group_name,
+        {'type': 'job.status', 'data': data}
+    )
+```
+
+4. UI receives events and updates job output display in real-time
+
+## Instance and Instance Groups
+
+AWX supports clustered deployments with multiple nodes:
+
+<Tabs>
+  <Tab title="Instance Types">
+    From `awx/main/models/ha.py`:
+    
+    ```python
+    class Instance(models.Model):
+        """Represents an AWX node in the cluster."""
+        hostname = models.CharField(max_length=250, unique=True)
+        node_type = models.CharField(
+            choices=[
+                ('control', 'Control Plane Node'),
+                ('execution', 'Execution Node'),
+                ('hop', 'Hop Node'),
+                ('hybrid', 'Hybrid Node'),
+            ]
+        )
+        capacity = models.IntegerField(default=100)
+        enabled = models.BooleanField(default=True)
+    ```
+    
+    - **Control**: Web, API, task manager (no job execution)
+    - **Execution**: Job execution only (via Receptor)
+    - **Hybrid**: Both control and execution
+    - **Hop**: Receptor routing only (no AWX services)
+  </Tab>
+  
+  <Tab title="Instance Groups">
+    ```python
+    class InstanceGroup(models.Model):
+        """Logical grouping of instances for job routing."""
+        name = models.CharField(max_length=250, unique=True)
+        instances = models.ManyToManyField('Instance')
+        is_container_group = models.BooleanField(default=False)
+    ```
+    
+    Job templates specify instance groups for execution:
+    - Default instance group (typically all hybrid nodes)
+    - Custom instance groups (e.g., "production-executors")
+    - Container groups (Kubernetes pods for job execution)
+  </Tab>
+  
+  <Tab title="Capacity Algorithm">
+    Capacity based on:
+    
+    ```python
+    # Conceptual formula
+    capacity = (
+        (CPU cores * 10) +
+        (RAM_GB * 2) -
+        (current_running_jobs * 1)
+    )
+    ```
+    
+    Jobs consume capacity proportional to forks:
+    ```python
+    job_impact = job.forks
+    ```
+    
+    Task manager won't schedule job if `instance.remaining_capacity < job_impact`.
+  </Tab>
+</Tabs>
+
+## Credential System
+
+AWX's credential system securely manages authentication:
+
+### Credential Types
+
+From `awx/main/models/credential.py`:
+
+```python
+class CredentialType(models.Model):
+    """Defines schema for credential input fields."""
+    
+    kind = models.CharField(
+        choices=[
+            ('cloud', 'Cloud'),
+            ('net', 'Network'),
+            ('ssh', 'Machine'),
+            ('vault', 'Vault'),
+            ('external', 'External'),
+        ]
+    )
+    
+    # JSON schema for input fields
+    inputs = models.JSONField(default=dict)
+    
+    # JSON schema for injecting credentials into jobs
+    injectors = models.JSONField(default=dict)
+```
+
+**Built-in credential types:**
+- Machine (SSH keys, passwords, privilege escalation)
+- Source Control (Git, SVN)
+- Vault (Ansible Vault passwords)
+- Cloud (AWS, Azure, GCP, OpenStack)
+- Network (for network devices)
+- Container Registry
+- HashiCorp Vault (external secret lookup)
+
+### Encryption
+
+Credentials are encrypted at rest:
+
+```python
+# From awx/main/utils/encryption.py concepts
+def encrypt_field(obj, field_name):
+    """Encrypt a model field using Fernet symmetric encryption."""
+    value = getattr(obj, field_name)
+    if value:
+        encrypted = fernet.encrypt(value.encode())
+        return encrypted
+    return value
+
+def decrypt_field(obj, field_name):
+    """Decrypt a model field."""
+    value = getattr(obj, field_name)
+    if value:
+        decrypted = fernet.decrypt(value)
+        return decrypted.decode()
+    return value
+```
+
+Encryption key derived from `SECRET_KEY` in Django settings.
+
+### Credential Injection
+
+Credentials are injected into jobs via environment variables or files:
+
+```python
+# From awx/main/models/credential.py
+def build_safe_env(credential):
+    """Build environment dict with credential values."""
+    env = {}
+    
+    # Example: AWS credentials
+    if credential.credential_type.kind == 'aws':
+        env['AWS_ACCESS_KEY_ID'] = credential.inputs['username']
+        env['AWS_SECRET_ACCESS_KEY'] = credential.inputs['password']
+    
+    # Machine credentials → SSH agent
+    if credential.credential_type.kind == 'ssh':
+        # Write SSH key to temporary file
+        # Set up SSH agent
+        # Set ansible_ssh_private_key_file
+    
+    return env
+```
+
+## Notification System
+
+AWX sends notifications on job success/failure:
+
+**Notification Types:**
+- Email (SMTP)
+- Slack
+- PagerDuty
+- Webhooks
+- IRC
+- Mattermost
+- Grafana
+- Twilio (SMS)
+
+```python
+# From awx/main/models/notifications.py
+class NotificationTemplate(models.Model):
+    """Configuration for sending notifications."""
+    notification_type = models.CharField(
+        choices=[
+            ('email', 'Email'),
+            ('slack', 'Slack'),
+            ('webhook', 'Webhook'),
+            # ...
+        ]
+    )
+    notification_configuration = models.JSONField()
+```
+
+Job templates specify when to send notifications:
+- On job start
+- On job success
+- On job failure
+
+## Performance and Scaling
+
+<CardGroup cols={2}>
+  <Card title="Horizontal Scaling">
+    Add more control plane nodes for API capacity:
+    
+    ```bash
+    # In Kubernetes
+    kubectl scale deployment awx-web --replicas=3
+    kubectl scale deployment awx-task --replicas=3
+    ```
+  </Card>
+  
+  <Card title="Execution Scaling">
+    Add execution nodes for job capacity:
+    
+    - Register new instances in AWX
+    - Add to instance groups
+    - Configure Receptor connections
+    - Capacity increases automatically
+  </Card>
+  
+  <Card title="Database Performance">
+    - Partitioned event tables reduce query times
+    - Indexes on frequently queried fields
+    - Connection pooling via PgBouncer
+    - Read replicas for reporting (if needed)
+  </Card>
+  
+  <Card title="Caching Strategy">
+    - Redis cache for settings (60s TTL)
+    - In-memory cache for RBAC evaluations (5s TTL)
+    - Browser caching for static assets
+    - API result caching (selective)
+  </Card>
+</CardGroup>
+
+## Security Considerations
+
+<Tabs>
+  <Tab title="Authentication">
+    - Username/password (local or LDAP)
+    - SAML 2.0
+    - OAuth2 (social auth: GitHub, Google, etc.)
+    - Token-based for API access
+    - Session management via Django
+  </Tab>
+  
+  <Tab title="Authorization (RBAC)">
+    From django-ansible-base:
+    
+    - Role definitions (Admin, Execute, Use, Update, etc.)
+    - Object-level permissions
+    - Permission inheritance (organization → team → user)
+    - Role evaluation caching for performance
+  </Tab>
+  
+  <Tab title="Secrets Management">
+    - Field-level encryption for credentials
+    - External credential sources (HashiCorp Vault, CyberArk)
+    - Credential isolation per job execution
+    - No secrets in logs or API responses
+  </Tab>
+  
+  <Tab title="Network Security">
+    - HTTPS enforced for web/API
+    - TLS for WebSockets
+    - Receptor mesh encrypted
+    - Configurable TLS certificate validation
+  </Tab>
+</Tabs>
+
+## Monitoring and Observability
+
+AWX provides multiple monitoring interfaces:
+
+<Accordion title="Prometheus Metrics">
+  AWX exports Prometheus metrics:
+  
+  - Job counts by status
+  - Instance capacity and utilization
+  - Task manager queue depth
+  - Database connection pool stats
+  - HTTP request rates and latencies
+  
+  Access at `/api/v2/metrics/` (requires authentication).
+</Accordion>
+
+<Accordion title="OpenTelemetry (Experimental)">
+  AWX can export traces and logs to OpenTelemetry collectors:
+  
+  ```bash
+  # From tools/docker-compose/README.md
+  OTEL=true GRAFANA=true LOKI=true make docker-compose
+  ```
+  
+  Enables distributed tracing across AWX components.
+</Accordion>
+
+<Accordion title="Activity Stream">
+  AWX logs all changes to resources in `main_activitystream` table:
+  
+  - User actions (create, update, delete)
+  - Job launches
+  - Configuration changes
+  - Login/logout events
+  
+  Provides full audit trail via UI or API.
+</Accordion>
+
+<Accordion title="External Logging">
+  Forward logs to external aggregators:
+  
+  - Splunk
+  - ELK stack (Elasticsearch, Logstash, Kibana)
+  - Grafana Loki
+  - Sumologic
+  
+  Configured via Settings → System → Logging.
+</Accordion>
+
+## Development Architecture
+
+For developers working on AWX:
+
+### Development Environment
+
+From `tools/docker-compose/README.md`:
+
+```bash
+# Build development image
+make docker-compose-build
+
+# Start AWX with hot-reload
+make docker-compose
+
+# Access shell in container
+docker exec -it tools_awx_1 bash
+
+# Run migrations
+awx-manage migrate
+
+# Create superuser
+awx-manage createsuperuser
+```
+
+### Project Structure
+
+```
+awx/
+├── awx/                    # Main Django application
+│   ├── main/              # Core models, tasks, business logic
+│   │   ├── models/        # Django models
+│   │   ├── tasks/         # Background tasks
+│   │   ├── dispatch/      # Task queue system
+│   │   └── tests/         # Unit tests
+│   ├── api/               # REST API (DRF)
+│   ├── conf/              # Dynamic configuration system
+│   ├── ui/                # React frontend (built separately)
+│   └── settings/          # Django settings files
+├── awxkit/                # Python CLI client library
+├── awx_collection/        # Ansible collection for AWX
+├── tools/                 # Development tools
+│   ├── docker-compose/    # Docker Compose setup
+│   └── grafana/          # Grafana dashboards
+├── requirements/          # Python dependencies
+└── docs/                  # Documentation
+```
+
+### Testing
+
+```bash
+# Run unit tests
+make test
+
+# Run specific test
+py.test awx/main/tests/unit/test_models.py::TestJobModel
+
+# Run with coverage
+make test COVERAGE=true
+```
+
+## Summary
+
+AWX's architecture combines:
+
+<CardGroup cols={3}>
+  <Card title="Modern Web Stack" icon="layer-group">
+    Django + DRF + React for robust web application foundation
+  </Card>
+  
+  <Card title="Scalable Execution" icon="expand">
+    Distributed task execution via Receptor mesh and ansible-runner
+  </Card>
+  
+  <Card title="Enterprise Features" icon="building">
+    RBAC, audit logging, HA, secrets management, and monitoring
+  </Card>
+</CardGroup>
+
+This architecture enables AWX to manage automation at scale, from small teams to large enterprises with thousands of nodes and complex workflows.
+
+## Related Documentation
+
+<CardGroup cols={2}>
+  <Card title="Introduction" icon="book-open" href="/introduction">
+    Overview of AWX features and capabilities
+  </Card>
+  
+  <Card title="Getting Started" icon="rocket" href="/getting-started">
+    Install AWX and run your first job
+  </Card>
+  
+  <Card title="AWX Source Code" icon="github" href="https://github.com/ansible/awx">
+    Explore the complete source on GitHub
+  </Card>
+  
+  <Card title="Ansible Docs" icon="book" href="https://docs.ansible.com/projects/awx/">
+    Official AWX documentation
+  </Card>
+</CardGroup>

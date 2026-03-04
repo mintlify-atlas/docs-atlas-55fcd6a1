@@ -1,0 +1,274 @@
+---
+title: 'Authentication'
+description: 'Authenticate your API requests to AWX'
+---
+
+## Overview
+
+AWX supports multiple authentication methods for API access. All API requests must be authenticated unless accessing public endpoints.
+
+## Authentication Methods
+
+AWX supports the following authentication methods based on the source code (`awx/api/authentication.py`):
+
+### 1. Session Authentication
+
+Session-based authentication using Django sessions. Primarily used by the web UI.
+
+```bash
+# Login to create session
+curl -X POST \
+  https://awx.example.com/api/login/ \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=admin&password=secret" \
+  -c cookies.txt
+
+# Use session cookie for subsequent requests
+curl -X GET \
+  https://awx.example.com/api/v2/me/ \
+  -b cookies.txt
+```
+
+### 2. Basic Authentication
+
+HTTP Basic Authentication with username and password. Must be enabled via `AUTH_BASIC_ENABLED` setting.
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/me/ \
+  -u "admin:password"
+```
+
+<Warning>
+  Basic authentication must be enabled in AWX settings. It is logged for audit purposes.
+</Warning>
+
+### 3. OAuth 2.0 Token Authentication
+
+The recommended method for API access using bearer tokens.
+
+#### Create an OAuth Token
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/users/1/personal_tokens/ \
+  -u "admin:password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "My API Token",
+    "application": null,
+    "scope": "write"
+  }'
+```
+
+<ResponseField name="token" type="string">
+  The bearer token to use for authentication
+</ResponseField>
+
+<ResponseField name="refresh_token" type="string">
+  Token used to refresh the access token
+</ResponseField>
+
+<ResponseField name="expires" type="string">
+  Token expiration timestamp
+</ResponseField>
+
+#### Use the Token
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE"
+```
+
+### 4. Application OAuth Tokens
+
+Create OAuth2 applications for third-party integrations.
+
+#### Create an Application
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/applications/ \
+  -u "admin:password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Application",
+    "description": "Integration app",
+    "client_type": "confidential",
+    "authorization_grant_type": "password",
+    "organization": 1
+  }'
+```
+
+<ResponseField name="client_id" type="string">
+  OAuth client identifier
+</ResponseField>
+
+<ResponseField name="client_secret" type="string">
+  OAuth client secret (confidential clients only)
+</ResponseField>
+
+## Token Management
+
+### List Your Tokens
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/users/1/personal_tokens/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Revoke a Token
+
+```bash
+curl -X DELETE \
+  https://awx.example.com/api/v2/users/1/personal_tokens/123/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Token Scopes
+
+Tokens can have different scopes:
+
+- **read** - Read-only access
+- **write** - Read and write access (default)
+
+```json
+{
+  "scope": "read"
+}
+```
+
+## Current User Information
+
+Get information about the authenticated user:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/me/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ResponseField name="id" type="integer">
+  User ID
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  Username
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Email address
+</ResponseField>
+
+<ResponseField name="is_superuser" type="boolean">
+  Whether user has superuser privileges
+</ResponseField>
+
+<ResponseField name="is_system_auditor" type="boolean">
+  Whether user has system auditor role
+</ResponseField>
+
+## Login and Logout Endpoints
+
+### Login
+
+```bash
+POST /api/login/
+```
+
+Creates a session. Returns session cookie.
+
+<ParamField body="username" type="string" required>
+  Username
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Password
+</ParamField>
+
+### Logout
+
+```bash
+GET /api/logout/
+```
+
+Invalidates the current session.
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use OAuth Tokens">
+    Prefer OAuth tokens over basic authentication. Tokens can be revoked and have expiration times.
+  </Accordion>
+
+  <Accordion title="Use HTTPS">
+    Always use HTTPS in production to protect credentials and tokens in transit.
+  </Accordion>
+
+  <Accordion title="Rotate Tokens Regularly">
+    Create new tokens periodically and revoke old ones to minimize security risks.
+  </Accordion>
+
+  <Accordion title="Use Limited Scopes">
+    Use read-only tokens when write access is not needed.
+  </Accordion>
+
+  <Accordion title="Store Tokens Securely">
+    Never commit tokens to source control. Use environment variables or secret management systems.
+  </Accordion>
+</AccordionGroup>
+
+## Authentication Errors
+
+### 401 Unauthorized
+
+Missing or invalid authentication credentials:
+
+```json
+{
+  "detail": "Authentication credentials were not provided."
+}
+```
+
+### 403 Forbidden
+
+Valid authentication but insufficient permissions:
+
+```json
+{
+  "detail": "You do not have permission to perform this action."
+}
+```
+
+## Example: Complete Authentication Flow
+
+```bash
+# 1. Create a personal access token
+TOKEN_RESPONSE=$(curl -s -X POST \
+  https://awx.example.com/api/v2/users/1/personal_tokens/ \
+  -u "admin:password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "API Access",
+    "scope": "write"
+  }')
+
+# 2. Extract the token
+TOKEN=$(echo $TOKEN_RESPONSE | jq -r '.token')
+
+# 3. Use the token for API requests
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/ \
+  -H "Authorization: Bearer $TOKEN"
+
+# 4. Verify current user
+curl -X GET \
+  https://awx.example.com/api/v2/me/ \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## Proxy and Gateway Authentication
+
+AWX supports trusted proxy authentication via the `X-Trusted-Proxy` header for integration with authentication gateways. This is configured via `REMOTE_HOST_HEADERS` and `PROXY_IP_ALLOWED_LIST` settings.

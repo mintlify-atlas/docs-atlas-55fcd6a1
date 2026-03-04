@@ -1,0 +1,253 @@
+---
+title: 'Introduction to AWX'
+description: 'Learn about AWX, the upstream project for Red Hat Ansible Automation Platform, providing web-based automation, API, and task engine built on Ansible'
+---
+
+# Introduction to AWX
+
+AWX provides a web-based user interface, REST API, and task engine built on top of [Ansible](https://github.com/ansible/ansible). It is the upstream project for [Red Hat Ansible Automation Platform](https://www.ansible.com/products/automation-platform), enabling teams to better control their Ansible automation at scale.
+
+<Note>
+  AWX is currently undergoing a large-scale refactoring to transition to a pluggable, service-oriented architecture. Follow the [Ansible Forum](https://forum.ansible.com/tag/awx) for updates on this transformation.
+</Note>
+
+## What is AWX?
+
+AWX is an open-source automation platform that makes Ansible even more powerful by adding a web UI, REST API, role-based access control (RBAC), job scheduling, credential management, and much more. It transforms Ansible from a command-line tool into a centralized automation hub for your entire organization.
+
+### Key Capabilities
+
+<CardGroup cols={2}>
+  <Card title="Centralized Control" icon="tower-control">
+    Manage all your Ansible automation from a single web interface with comprehensive visibility into job status, output, and history.
+  </Card>
+  
+  <Card title="REST API" icon="code">
+    Full-featured REST API enables integration with CI/CD pipelines, external tools, and custom applications.
+  </Card>
+  
+  <Card title="Role-Based Access" icon="shield">
+    Granular permissions system using django-ansible-base RBAC to control who can execute which playbooks against which inventories.
+  </Card>
+  
+  <Card title="Credential Management" icon="key">
+    Secure credential storage with encryption, supporting multiple credential types including cloud providers, SCM systems, and HashiCorp Vault.
+  </Card>
+  
+  <Card title="Job Scheduling" icon="clock">
+    Schedule playbook runs at specific times or intervals, with support for complex scheduling patterns.
+  </Card>
+  
+  <Card title="Real-time Updates" icon="bolt">
+    WebSocket-based real-time job output and status updates keep you informed as automation executes.
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+AWX is built on modern, scalable technologies:
+
+<Tabs>
+  <Tab title="Backend">
+    - **Django** web framework with Django REST Framework for API endpoints
+    - **PostgreSQL** database for persistent storage
+    - **Redis** for caching and WebSocket message broker
+    - **Dispatcher** task queue system for asynchronous job execution
+    - **Receptor** mesh networking for distributed job execution
+  </Tab>
+  
+  <Tab title="Frontend">
+    - **React** UI built with the ansible-ui framework
+    - **PatternFly** design system for consistent UX
+    - **WebSockets** for real-time job output streaming
+  </Tab>
+  
+  <Tab title="Execution">
+    - **ansible-runner** for executing Ansible playbooks in isolated environments
+    - **Execution Environments** (container images) for consistent, portable automation
+    - **Container Groups** for running jobs in Kubernetes/OpenShift
+  </Tab>
+</Tabs>
+
+## Core Concepts
+
+### Organizations
+
+The highest level organizational unit in AWX. Organizations contain teams, users, and logical groupings of inventories, projects, and job templates.
+
+### Projects
+
+Projects represent your Ansible playbook repositories. AWX supports Git, Subversion, and manual project types, automatically syncing playbook content from your SCM.
+
+```python
+# From awx/main/models/projects.py
+SCM_TYPE_CHOICES = [
+    ('', _('Manual')),
+    ('git', _('Git')),
+    ('svn', _('Subversion')),
+    ('insights', _('Red Hat Insights')),
+    ('archive', _('Remote Archive')),
+]
+```
+
+### Inventories
+
+Inventories define the hosts and groups that your playbooks will run against. AWX supports:
+
+- **Static inventories**: Manually defined hosts and groups
+- **Dynamic inventories**: Auto-populated from cloud providers, Satellite, and other sources  
+- **Smart inventories**: Host lists generated dynamically using filters
+- **Constructed inventories**: Parse multiple source inventories together
+
+### Job Templates
+
+Job templates combine a project (playbooks), inventory (hosts), and credentials to create a reusable automation workflow. They define:
+
+- Which playbook to run
+- Which inventory to run against
+- What credentials to use
+- Job behavior (verbosity, privilege escalation, etc.)
+- Survey prompts for runtime variables
+
+### Credentials
+
+Securely stored authentication information with support for:
+
+- Machine credentials (SSH keys, passwords)
+- SCM credentials (Git, Subversion)
+- Cloud credentials (AWS, Azure, GCP, OpenStack)
+- Network credentials (for network devices)
+- Custom credential types (extensible)
+
+<Info>
+  AWX uses encryption for sensitive credential data, with field-level encryption powered by the `encrypt_field` and `decrypt_field` utilities from `awx/main/utils`.
+</Info>
+
+## Job Execution Flow
+
+When you launch a job in AWX, here's what happens:
+
+<Steps>
+  <Step title="Job Creation">
+    A Job record is created in the PostgreSQL database with status "pending".
+  </Step>
+  
+  <Step title="Task Manager">
+    The AWX dispatcher's task manager evaluates the job, checking capacity, dependencies, and resource availability.
+  </Step>
+  
+  <Step title="Job Dispatch">
+    Once resources are available, the job is dispatched to an execution node via the Receptor mesh network.
+  </Step>
+  
+  <Step title="Ansible Execution">
+    The ansible-runner library executes the playbook in an isolated environment (container or virtual environment).
+  </Step>
+  
+  <Step title="Event Streaming">
+    Job events are streamed back to AWX via callbacks, stored in partitioned event tables, and broadcast via WebSockets to connected clients.
+  </Step>
+  
+  <Step title="Completion">
+    Job status is updated to "successful", "failed", or "error", and notifications are sent if configured.
+  </Step>
+</Steps>
+
+## Deployment Options
+
+### AWX Operator (Recommended)
+
+Starting with version 18.0, the [AWX Operator](https://github.com/ansible/awx-operator) is the preferred deployment method. It runs AWX on Kubernetes or OpenShift, providing:
+
+- Declarative configuration via Custom Resources
+- Automated upgrades and lifecycle management  
+- High availability and scalability
+- Integration with Kubernetes ecosystem
+
+### Docker Compose (Development)
+
+For development and testing, AWX can run via Docker Compose:
+
+```bash
+# From the AWX source repository
+make docker-compose-build
+make docker-compose
+```
+
+<Warning>
+  Docker Compose deployments are intended for development/testing only and should not be used in production.
+</Warning>
+
+## Use Cases
+
+AWX excels at:
+
+<Accordion title="Configuration Management">
+  Maintain consistent configurations across hundreds or thousands of servers, ensuring compliance and reducing configuration drift.
+</Accordion>
+
+<Accordion title="Application Deployment">
+  Automate complex multi-tier application deployments with pre-flight checks, rolling updates, and rollback capabilities.
+</Accordion>
+
+<Accordion title="Cloud Provisioning">
+  Provision and configure cloud infrastructure across AWS, Azure, GCP, and private clouds using Ansible's cloud modules.
+</Accordion>
+
+<Accordion title="Network Automation">
+  Configure network devices at scale using Ansible's network modules with AWX's credential management and scheduling.
+</Accordion>
+
+<Accordion title="Security Remediation">
+  Rapidly apply security patches and remediation playbooks across your infrastructure with audit trails and RBAC.
+</Accordion>
+
+<Accordion title="Workflow Orchestration">
+  Chain multiple job templates together in workflows with conditional logic, approval steps, and error handling.
+</Accordion>
+
+## Integration Points
+
+AWX integrates seamlessly with:
+
+- **CI/CD pipelines** via the REST API and CLI
+- **LDAP/Active Directory** for authentication
+- **SAML/OAuth** for single sign-on
+- **Logging systems** (Splunk, ELK, Loki) for centralized log aggregation
+- **Notification systems** (Slack, email, PagerDuty, webhooks)
+- **Source control** (GitHub, GitLab, Bitbucket)
+- **Secret management** (HashiCorp Vault, CyberArk)
+
+## Community and Support
+
+AWX is an active open-source project with a vibrant community:
+
+<CardGroup cols={2}>
+  <Card title="Ansible Forum" icon="comments" href="https://forum.ansible.com/tag/awx">
+    Join discussions, ask questions, and share feedback
+  </Card>
+  
+  <Card title="GitHub" icon="github" href="https://github.com/ansible/awx">
+    Contribute code, report issues, and view the source
+  </Card>
+  
+  <Card title="Matrix Chat" icon="message" href="https://chat.ansible.im">
+    Real-time chat with the AWX community
+  </Card>
+  
+  <Card title="Ansible Docs" icon="book" href="https://docs.ansible.com/projects/awx/">
+    Official AWX documentation
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Get Started" icon="rocket" href="/getting-started">
+    Install AWX and run your first automation job
+  </Card>
+  
+  <Card title="Architecture Deep Dive" icon="diagram-project" href="/architecture">
+    Learn about AWX's internal architecture and components
+  </Card>
+</CardGroup>

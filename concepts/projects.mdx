@@ -1,0 +1,258 @@
+---
+title: Projects
+description: Understanding AWX Projects and how they manage Ansible content
+---
+
+## What is a Project?
+
+A **Project** in AWX is a logical collection of Ansible playbooks, roles, and related files. Projects represent a playbook repository that can be synchronized from a source control system (Git, Subversion) or from a local directory. Projects are essential for organizing and versioning your Ansible automation content.
+
+<Info>
+Projects bridge the gap between your source control system and AWX, ensuring that jobs always run with the correct, versioned content.
+</Info>
+
+## Core Concepts
+
+### Project Types
+
+AWX supports several SCM (Source Control Management) types for projects:
+
+- **Manual**: Playbooks are stored locally on the AWX server under `PROJECTS_ROOT`
+- **Git**: Synchronize from Git repositories (most common)
+- **Subversion**: Synchronize from SVN repositories
+- **Red Hat Insights**: Pull playbooks from Red Hat Insights
+- **Remote Archive**: Download and extract playbooks from a remote archive file
+
+### Key Fields
+
+From the Project model (`awx/main/models/projects.py:252`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | String | Project name (unique within organization) |
+| `description` | String | Optional description |
+| `organization` | ForeignKey | Organization that owns this project |
+| `scm_type` | Choice | Type of SCM (`git`, `svn`, `insights`, `archive`, or empty for manual) |
+| `scm_url` | String | Repository URL |
+| `scm_branch` | String | Specific branch, tag, or commit to checkout |
+| `scm_refspec` | String | Additional refspec to fetch (Git only) |
+| `scm_clean` | Boolean | Discard local changes before syncing |
+| `scm_delete_on_update` | Boolean | Delete project before syncing |
+| `scm_track_submodules` | Boolean | Track submodules' latest commits |
+| `credential` | ForeignKey | SCM credential for authentication |
+| `scm_update_on_launch` | Boolean | Update project when launching a job |
+| `scm_update_cache_timeout` | Integer | Cache timeout in seconds |
+| `allow_override` | Boolean | Allow job templates to override SCM branch |
+| `default_environment` | ForeignKey | Default execution environment for jobs using this project |
+| `signature_validation_credential` | ForeignKey | Credential for validating content signatures |
+
+## How Projects Work
+
+### Project Updates
+
+When a project is created or updated, AWX runs a **Project Update** job to synchronize content from the SCM:
+
+```python
+# From projects.py:393-394
+if (relevant_change or new_instance) and (not self._skip_update) and self.scm_type:
+    self.update()
+```
+
+<Steps>
+  <Step title="SCM Sync">
+    AWX clones or pulls from the configured repository
+  </Step>
+  <Step title="Content Discovery">
+    AWX scans for playbooks and inventory files in the project
+  </Step>
+  <Step title="Validation">
+    If configured, AWX validates content signatures
+  </Step>
+  <Step title="Cache Update">
+    Project revision and playbook lists are updated
+  </Step>
+</Steps>
+
+### Project Status
+
+Projects have several status states (`projects.py:396-413`):
+
+- **never updated**: New project that hasn't synced yet
+- **pending**: Update job is queued
+- **running**: Currently syncing from SCM
+- **successful**: Last update succeeded
+- **failed**: Last update failed
+- **error**: Update encountered an error
+- **canceled**: Update was canceled
+- **missing**: Manual project with missing local path
+- **ok**: Manual project with valid local path
+
+### Update on Launch
+
+Projects can be configured to update automatically when a job is launched:
+
+```python
+# From projects.py:443-449
+@property
+def needs_update_on_launch(self):
+    if self.scm_type and self.scm_update_on_launch:
+        if not self.last_job_run:
+            return True
+        if (self.last_job_run + datetime.timedelta(seconds=self.scm_update_cache_timeout)) <= now():
+            return True
+    return False
+```
+
+The `scm_update_cache_timeout` field controls how often updates can occur, preventing excessive syncing.
+
+## Playbook Discovery
+
+AWX automatically discovers playbooks in the project directory:
+
+```python
+# From projects.py:208-219
+@property
+def playbooks(self):
+    results = []
+    project_path = self.get_project_path()
+    if project_path:
+        for dirpath, dirnames, filenames in os.walk(smart_str(project_path), followlinks=settings.AWX_SHOW_PLAYBOOK_LINKS):
+            if skip_directory(dirpath):
+                continue
+            for filename in filenames:
+                playbook = could_be_playbook(project_path, dirpath, filename)
+                if playbook is not None:
+                    results.append(smart_str(playbook))
+    return sorted(results, key=lambda x: smart_str(x).lower())
+```
+
+Discovered playbooks are available in the `playbook_files` field and shown when creating job templates.
+
+## Branch Override
+
+The `allow_override` field enables job templates to specify different branches:
+
+<Warning>
+Only enable branch override if you trust users with execute permissions on job templates using this project. They could potentially execute arbitrary code from any branch.
+</Warning>
+
+## Content Signing
+
+Projects support GPG content signing for security:
+
+1. Set the `signature_validation_credential` to a GPG public key credential
+2. AWX validates playbooks and roles against signatures during project updates
+3. If validation fails, the project update fails with a specific error message
+
+```python
+# From projects.py:508-514
+if latest_update is not None and latest_update.failed:
+    failed_validation_tasks = latest_update.project_update_events.filter(
+        event='runner_on_failed',
+        play="Perform project signature/checksum verification",
+    )
+    if failed_validation_tasks:
+        return _("Last project update failed due to signature validation failure.")
+```
+
+## API Endpoints
+
+### List Projects
+```http
+GET /api/v2/projects/
+```
+
+### Create Project
+```http
+POST /api/v2/projects/
+Content-Type: application/json
+
+{
+  "name": "My Ansible Project",
+  "description": "Production playbooks",
+  "organization": 1,
+  "scm_type": "git",
+  "scm_url": "https://github.com/ansible/ansible-examples.git",
+  "scm_branch": "main",
+  "scm_update_on_launch": true,
+  "scm_update_cache_timeout": 300
+}
+```
+
+### Update Project
+```http
+PATCH /api/v2/projects/{id}/
+```
+
+### Trigger Project Update
+```http
+POST /api/v2/projects/{id}/update/
+```
+
+### Get Project Playbooks
+```http
+GET /api/v2/projects/{id}/playbooks/
+```
+
+## Permissions
+
+Projects have the following role types (`projects.py:326-348`):
+
+- **Admin Role**: Full control over the project
+- **Use Role**: Can use project in job templates
+- **Update Role**: Can trigger project updates
+- **Read Role**: Can view project details
+
+<Tip>
+Project permissions are inherited from organization roles. Organization project admins automatically have admin access to all projects in their organization.
+</Tip>
+
+## Execution Environments
+
+Projects have a `default_environment` field that specifies which execution environment to use for jobs:
+
+```python
+# From projects.py:267-275
+default_environment = models.ForeignKey(
+    'ExecutionEnvironment',
+    null=True,
+    blank=True,
+    default=None,
+    on_delete=polymorphic.SET_NULL,
+    related_name='+',
+    help_text=_('The default execution environment for jobs run using this project.'),
+)
+```
+
+Note that project updates themselves always use the control plane execution environment, not the project's default environment.
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Source Control">
+    Always use Git or another SCM for projects rather than manual projects. This provides version control, collaboration, and rollback capabilities.
+  </Accordion>
+  
+  <Accordion title="Enable Update on Launch">
+    For development environments, enable `scm_update_on_launch` to ensure jobs always use the latest code. For production, disable it and manually control updates.
+  </Accordion>
+  
+  <Accordion title="Set Cache Timeout">
+    Use `scm_update_cache_timeout` to prevent excessive updates. A value of 60-300 seconds is typically appropriate.
+  </Accordion>
+  
+  <Accordion title="Use Specific Branches">
+    Specify branches or tags in `scm_branch` rather than using default branches to ensure consistency.
+  </Accordion>
+  
+  <Accordion title="Enable Content Signing">
+    For production environments, use GPG content signing to ensure playbook integrity.
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+- [Job Templates](/concepts/job-templates) - Use projects in job templates
+- [Execution Environments](/concepts/execution-environments) - Set default execution environment
+- [Credentials](/concepts/credentials) - Configure SCM credentials
+- [Organizations](/guides/organizations-and-teams) - Organize projects by organization

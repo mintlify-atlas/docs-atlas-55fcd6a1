@@ -1,0 +1,495 @@
+---
+title: 'Inventories'
+description: 'Manage AWX inventories via the API'
+---
+
+## Overview
+
+Inventories are collections of hosts that can be targeted by Ansible playbooks. AWX supports regular inventories, smart inventories (dynamic host filtering), and constructed inventories.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/inventories/` | List inventories |
+| POST | `/api/v2/inventories/` | Create inventory |
+| GET | `/api/v2/inventories/{id}/` | Retrieve inventory |
+| PATCH | `/api/v2/inventories/{id}/` | Update inventory |
+| DELETE | `/api/v2/inventories/{id}/` | Delete inventory |
+| POST | `/api/v2/inventories/{id}/copy/` | Copy inventory |
+
+## List Inventories
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Create Inventory
+
+### Standard Inventory
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/inventories/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Production Servers",
+    "description": "Production infrastructure",
+    "organization": 1,
+    "kind": "",
+    "variables": "---\nansible_connection: ssh"
+  }'
+```
+
+### Smart Inventory
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/inventories/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Ubuntu Hosts",
+    "description": "All Ubuntu servers",
+    "organization": 1,
+    "kind": "smart",
+    "host_filter": "ansible_facts__ansible_distribution__icontains=ubuntu"
+  }'
+```
+
+<ParamField body="name" type="string" required>
+  Inventory name
+</ParamField>
+
+<ParamField body="description" type="string">
+  Inventory description
+</ParamField>
+
+<ParamField body="organization" type="integer" required>
+  Organization ID
+</ParamField>
+
+<ParamField body="kind" type="string" default="">
+  Inventory type: `` (regular), `smart`, or `constructed`
+</ParamField>
+
+<ParamField body="host_filter" type="string">
+  Smart inventory host filter (required for smart inventories)
+</ParamField>
+
+<ParamField body="variables" type="string">
+  Inventory variables in YAML or JSON format
+</ParamField>
+
+<ParamField body="prevent_instance_group_fallback" type="boolean" default="false">
+  Prevent falling back to default instance group
+</ParamField>
+
+## Retrieve Inventory
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Response Schema
+
+<ResponseField name="id" type="integer">
+  Inventory ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Inventory name
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Inventory description
+</ResponseField>
+
+<ResponseField name="organization" type="integer">
+  Organization ID
+</ResponseField>
+
+<ResponseField name="kind" type="string">
+  Inventory kind: ``, `smart`, or `constructed`
+</ResponseField>
+
+<ResponseField name="host_filter" type="string">
+  Smart inventory filter
+</ResponseField>
+
+<ResponseField name="variables" type="string">
+  Inventory-level variables
+</ResponseField>
+
+<ResponseField name="has_active_failures" type="boolean">
+  Whether any hosts have active failures
+</ResponseField>
+
+<ResponseField name="total_hosts" type="integer">
+  Total number of hosts
+</ResponseField>
+
+<ResponseField name="hosts_with_active_failures" type="integer">
+  Number of hosts with failures
+</ResponseField>
+
+<ResponseField name="total_groups" type="integer">
+  Total number of groups
+</ResponseField>
+
+<ResponseField name="has_inventory_sources" type="boolean">
+  Whether inventory has sources
+</ResponseField>
+
+<ResponseField name="total_inventory_sources" type="integer">
+  Number of inventory sources
+</ResponseField>
+
+<ResponseField name="inventory_sources_with_failures" type="integer">
+  Number of failed sources
+</ResponseField>
+
+<ResponseField name="pending_deletion" type="boolean">
+  Whether inventory is pending deletion
+</ResponseField>
+
+<ResponseField name="related" type="object">
+  Links to related resources:
+  - `hosts` - Inventory hosts
+  - `groups` - Inventory groups
+  - `root_groups` - Top-level groups
+  - `variable_data` - All variables
+  - `script` - Dynamic inventory script
+  - `tree` - Inventory tree view
+  - `inventory_sources` - Inventory sources
+  - `update_inventory_sources` - Trigger source updates
+  - `activity_stream` - Activity log
+  - `job_templates` - Job templates using this inventory
+  - `ad_hoc_commands` - Ad hoc commands
+  - `access_list` - Access list
+  - `object_roles` - Available roles
+  - `instance_groups` - Instance groups
+  - `labels` - Inventory labels
+  - `copy` - Copy endpoint
+  - `input_inventories` - Input inventories (constructed only)
+</ResponseField>
+
+## Update Inventory
+
+```bash
+curl -X PATCH \
+  https://awx.example.com/api/v2/inventories/3/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Updated description",
+    "variables": "---\nansible_user: admin"
+  }'
+```
+
+## Delete Inventory
+
+```bash
+curl -X DELETE \
+  https://awx.example.com/api/v2/inventories/3/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<Warning>
+  Deleting an inventory also deletes all hosts, groups, and inventory sources.
+</Warning>
+
+## Inventory Hosts
+
+### List Hosts
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/hosts/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Add Host
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/inventories/3/hosts/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "web01.example.com",
+    "description": "Web server 01",
+    "variables": "ansible_host: 192.168.1.10"
+  }'
+```
+
+## Inventory Groups
+
+### List Groups
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/groups/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Create Group
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/inventories/3/groups/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "webservers",
+    "description": "Web server group",
+    "variables": "http_port: 80"
+  }'
+```
+
+## Inventory Sources
+
+### List Inventory Sources
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/inventory_sources/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Create Inventory Source
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/inventories/3/inventory_sources/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "AWS EC2",
+    "description": "EC2 dynamic inventory",
+    "source": "ec2",
+    "credential": 5,
+    "source_vars": "---\nregions:\n  - us-east-1",
+    "update_on_launch": true,
+    "overwrite": false,
+    "overwrite_vars": false
+  }'
+```
+
+### Update All Inventory Sources
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/inventories/3/update_inventory_sources/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Inventory Script
+
+Get dynamic inventory script output:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/script/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Returns Ansible dynamic inventory JSON.
+
+## Inventory Tree
+
+Get hierarchical tree view:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/tree/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Variable Data
+
+Get all inventory variables (inventory + group + host):
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/variable_data/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Ad Hoc Commands
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/ad_hoc_commands/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Job Templates
+
+List job templates using this inventory:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/job_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Labels
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/labels/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Instance Groups
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/instance_groups/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Object Roles
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/inventories/3/object_roles/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Available roles:
+- **admin_role** - Full inventory administration
+- **use_role** - Use inventory in job templates
+- **update_role** - Trigger inventory source updates
+- **adhoc_role** - Run ad hoc commands
+- **read_role** - View inventory details
+
+## Copy Inventory
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/inventories/3/copy/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Production Servers Copy"
+  }'
+```
+
+## Filtering
+
+```bash
+# By name
+?name__icontains=prod
+
+# By organization
+?organization=1
+
+# By kind
+?kind=smart
+
+# With active failures
+?has_active_failures=true
+
+# By total hosts
+?total_hosts__gte=10
+```
+
+## Ordering
+
+```bash
+# By name
+?order_by=name
+
+# By host count
+?order_by=-total_hosts
+
+# By creation date
+?order_by=-created
+```
+
+## Smart Inventory Host Filters
+
+Smart inventories use advanced filtering:
+
+```bash
+# Distribution
+host_filter=ansible_facts__ansible_distribution__icontains=ubuntu
+
+# Multiple conditions
+host_filter=ansible_facts__ansible_distribution=Ubuntu and name__startswith=web
+
+# OR conditions
+host_filter=name__startswith=web or name__startswith=db
+
+# Group membership
+host_filter=groups__name=webservers
+```
+
+## Complete Example
+
+```python
+import requests
+import json
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Create inventory
+inventory_data = {
+    "name": "Development Servers",
+    "description": "Dev environment",
+    "organization": 1,
+    "variables": "---\nansible_connection: ssh\nansible_user: ubuntu"
+}
+
+response = requests.post(
+    f"{base_url}/inventories/",
+    headers=headers,
+    data=json.dumps(inventory_data)
+)
+
+if response.status_code == 201:
+    inventory = response.json()
+    inv_id = inventory['id']
+    print(f"Created inventory {inv_id}")
+    
+    # Add hosts
+    hosts = ["web01", "web02", "db01"]
+    for host_name in hosts:
+        host_data = {
+            "name": f"{host_name}.example.com",
+            "variables": f"server_role: {host_name[:3]}"
+        }
+        requests.post(
+            f"{base_url}/inventories/{inv_id}/hosts/",
+            headers=headers,
+            data=json.dumps(host_data)
+        )
+    
+    # Create group
+    group_data = {
+        "name": "webservers",
+        "variables": "http_port: 8080"
+    }
+    requests.post(
+        f"{base_url}/inventories/{inv_id}/groups/",
+        headers=headers,
+        data=json.dumps(group_data)
+    )
+    
+    print(f"Inventory setup complete")
+else:
+    print(f"Error: {response.status_code}")
+    print(response.json())
+```

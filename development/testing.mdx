@@ -1,0 +1,518 @@
+---
+title: Testing AWX
+description: Comprehensive guide to testing AWX including unit tests, functional tests, and collection tests
+---
+
+AWX has a comprehensive test suite covering unit tests, functional tests, and integration tests. This guide covers how to run and write tests for AWX.
+
+## Test Framework
+
+AWX uses **pytest** as its primary test framework. The pytest configuration is defined in `pytest.ini` at the repository root.
+
+### Pytest Configuration
+
+Key settings from `pytest.ini`:
+
+```ini
+[pytest]
+DJANGO_SETTINGS_MODULE = awx.main.tests.settings_for_test
+python_files = *.py
+addopts = --reuse-db --nomigrations --tb=native
+
+markers =
+    ac: access control test
+    survey: tests related to survey feature
+    inventory_import: tests of code used by inventory import command
+    job_permissions:
+    activity_stream_access:
+    job_runtime_vars:
+```
+
+## Running Tests
+
+### Basic Test Commands
+
+From inside the AWX development container:
+
+```bash
+# Run all tests
+(container)/awx_devel$ make test
+
+# Run specific test directory
+(container)/awx_devel$ make test TEST_DIRS="awx/main/tests/unit"
+
+# Run tests in parallel
+(container)/awx_devel$ make test PARALLEL_TESTS="-n auto"
+
+# Run with coverage
+(container)/awx_devel$ make test COVERAGE_ARGS="--cov --cov-report=xml"
+```
+
+### Using pytest Directly
+
+```bash
+# Run all unit tests
+pytest awx/main/tests/unit
+
+# Run specific test file
+pytest awx/main/tests/unit/test_tasks.py
+
+# Run specific test function
+pytest awx/main/tests/unit/test_tasks.py::test_job_launch
+
+# Run tests matching a pattern
+pytest -k "test_inventory"
+
+# Run with verbose output
+pytest -v awx/main/tests/unit
+
+# Run with even more detail
+pytest -vv awx/main/tests/unit
+```
+
+## Test Organization
+
+### Test Directory Structure
+
+```
+awx/main/tests/
+├── unit/              # Unit tests
+│   ├── api/          # API endpoint tests
+│   ├── models/       # Model tests
+│   ├── tasks/        # Task tests
+│   ├── utils/        # Utility function tests
+│   └── ...
+├── functional/        # Functional/integration tests
+│   ├── api/
+│   ├── models/
+│   └── ...
+└── data/             # Test fixtures and data
+    ├── inventory/
+    ├── playbooks/
+    └── ...
+```
+
+### Test Types
+
+**Unit Tests**: Test individual functions and classes in isolation
+- Location: `awx/main/tests/unit/`
+- Fast, isolated, use mocking
+
+**Functional Tests**: Test API endpoints and workflows
+- Location: `awx/main/tests/functional/`
+- Integration-style tests with database
+
+**Collection Tests**: Test the AWX Ansible collection
+- Location: `awx_collection/test/awx/`
+- Uses ansible-test framework
+
+## Writing Unit Tests
+
+### Basic Test Structure
+
+```python
+import pytest
+from awx.main.models import Job
+
+class TestJobModel:
+    def test_job_creation(self):
+        """Test that a job can be created"""
+        job = Job.objects.create(
+            name="Test Job",
+            job_type="run"
+        )
+        assert job.name == "Test Job"
+        assert job.job_type == "run"
+
+    def test_job_status_transition(self):
+        """Test job status transitions"""
+        job = Job.objects.create(status="pending")
+        job.status = "running"
+        job.save()
+        assert job.status == "running"
+```
+
+### Using Fixtures
+
+Pytest fixtures provide reusable test data:
+
+```python
+import pytest
+from awx.main.models import Organization, Inventory
+
+@pytest.fixture
+def organization():
+    """Create a test organization"""
+    return Organization.objects.create(name="Test Org")
+
+@pytest.fixture
+def inventory(organization):
+    """Create a test inventory"""
+    return Inventory.objects.create(
+        name="Test Inventory",
+        organization=organization
+    )
+
+def test_inventory_belongs_to_org(inventory, organization):
+    """Test inventory-organization relationship"""
+    assert inventory.organization == organization
+    assert inventory in organization.inventories.all()
+```
+
+### Using Markers
+
+Markers categorize and filter tests:
+
+```python
+import pytest
+
+@pytest.mark.ac
+def test_access_control():
+    """Test access control logic"""
+    pass
+
+@pytest.mark.survey
+def test_survey_validation():
+    """Test survey validation"""
+    pass
+
+# Run only access control tests
+# pytest -m ac
+```
+
+### Mocking
+
+Use unittest.mock for isolating dependencies:
+
+```python
+from unittest.mock import patch, Mock
+import pytest
+
+@patch('awx.main.tasks.jobs.ansible_runner')
+def test_job_execution(mock_runner):
+    """Test job execution with mocked runner"""
+    mock_runner.run.return_value = Mock(
+        status="successful",
+        rc=0
+    )
+    
+    # Test job execution logic
+    job = Job.objects.create()
+    result = job.run()
+    
+    assert result.status == "successful"
+    mock_runner.run.assert_called_once()
+```
+
+## Functional Tests
+
+### API Testing
+
+Functional tests often test API endpoints:
+
+```python
+import pytest
+from rest_framework.test import APIClient
+
+@pytest.mark.django_db
+class TestJobTemplateAPI:
+    def test_create_job_template(self, admin_user, organization):
+        """Test creating a job template via API"""
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        
+        response = client.post('/api/v2/job_templates/', {
+            'name': 'Test Template',
+            'organization': organization.id,
+            'project': project.id,
+            'playbook': 'test.yml'
+        })
+        
+        assert response.status_code == 201
+        assert response.data['name'] == 'Test Template'
+    
+    def test_launch_job_template(self, admin_user, job_template):
+        """Test launching a job template"""
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        
+        response = client.post(
+            f'/api/v2/job_templates/{job_template.id}/launch/',
+            {}
+        )
+        
+        assert response.status_code == 201
+        assert 'job' in response.data
+```
+
+## Collection Tests
+
+### AWX Collection Testing
+
+The AWX Ansible collection has its own test suite:
+
+```bash
+# Install the collection
+make install_collection
+
+# Run collection unit tests
+make test_collection
+
+# Run specific collection tests
+cd awx_collection
+ansible-test units --docker
+
+# Run integration tests
+ansible-test integration --docker
+```
+
+### Collection Test Structure
+
+```bash
+awx_collection/
+├── test/
+│   └── awx/
+│       ├── unit/           # Unit tests
+│       └── integration/    # Integration tests
+└── plugins/
+    ├── modules/            # Ansible modules
+    └── inventory/          # Inventory plugins
+```
+
+### Writing Collection Tests
+
+```python
+# awx_collection/test/awx/unit/module_utils/test_controller_api.py
+import pytest
+from ansible_collections.awx.awx.plugins.module_utils.controller_api import ControllerAPIModule
+
+class TestControllerAPI:
+    def test_api_authentication(self):
+        """Test API authentication"""
+        module = ControllerAPIModule(
+            argument_spec={},
+            controller_host='https://awx.example.com',
+            controller_username='admin',
+            controller_password='password'
+        )
+        assert module.authenticated
+```
+
+## Code Coverage
+
+### Generating Coverage Reports
+
+```bash
+# Run tests with coverage
+make test COVERAGE_ARGS="--cov --cov-report=html --cov-report=xml"
+
+# View HTML coverage report
+# Open htmlcov/index.html in a browser
+
+# Coverage is also reported in codecov.io for PRs
+```
+
+### Coverage Configuration
+
+`.coveragerc` file configures coverage settings:
+
+```ini
+[run]
+source = awx
+omit = 
+    */tests/*
+    */migrations/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+```
+
+## Testing Best Practices
+
+### 1. Test Isolation
+
+Each test should be independent:
+
+```python
+# Good: Test creates its own data
+def test_user_creation():
+    user = User.objects.create(username="testuser")
+    assert user.username == "testuser"
+
+# Bad: Test depends on database state
+def test_user_exists():
+    user = User.objects.get(username="existing_user")
+    assert user is not None
+```
+
+### 2. Use Fixtures for Setup
+
+```python
+@pytest.fixture
+def job_template(organization, project, inventory):
+    """Provide a configured job template"""
+    return JobTemplate.objects.create(
+        name="Test Template",
+        organization=organization,
+        project=project,
+        inventory=inventory,
+        playbook="test.yml"
+    )
+```
+
+### 3. Test Edge Cases
+
+```python
+def test_job_with_empty_inventory():
+    """Test job behavior with empty inventory"""
+    job = Job.objects.create(inventory=empty_inventory)
+    with pytest.raises(ValidationError):
+        job.validate_hosts()
+
+def test_job_with_invalid_playbook():
+    """Test job with non-existent playbook"""
+    job = Job.objects.create(playbook="nonexistent.yml")
+    with pytest.raises(PlaybookNotFound):
+        job.run()
+```
+
+### 4. Clear Test Names
+
+```python
+# Good: Descriptive test names
+def test_job_template_requires_inventory():
+    pass
+
+def test_job_template_launch_creates_job():
+    pass
+
+# Bad: Unclear test names
+def test_jt_1():
+    pass
+
+def test_launch():
+    pass
+```
+
+### 5. Mock External Dependencies
+
+```python
+@patch('awx.main.tasks.jobs.requests.get')
+def test_project_update_with_git(mock_get):
+    """Test project update without making real Git calls"""
+    mock_get.return_value = Mock(status_code=200)
+    
+    project = Project.objects.create(scm_type='git')
+    project.update()
+    
+    mock_get.assert_called_once()
+```
+
+## Running Tests in CI
+
+AWX uses GitHub Actions for continuous integration.
+
+### Local CI Testing
+
+Run the same checks that CI runs:
+
+```bash
+# Code formatting
+make black
+
+# Run linters
+black --check awx/
+
+# Run tests with coverage
+make test COVERAGE_ARGS="--cov --cov-report=xml --junitxml=reports/junit.xml"
+
+# Run collection sanity tests
+cd awx_collection
+ansible-test sanity --docker
+```
+
+## Debugging Tests
+
+### Using pdb
+
+```python
+def test_complex_logic():
+    job = Job.objects.create()
+    
+    # Set breakpoint
+    import pdb; pdb.set_trace()
+    
+    result = job.run()
+    assert result.status == "successful"
+```
+
+### Verbose Output
+
+```bash
+# Show print statements
+pytest -s awx/main/tests/unit/test_tasks.py
+
+# Show test names as they run
+pytest -v awx/main/tests/unit/
+
+# Show full diff on assertion failures
+pytest -vv awx/main/tests/unit/
+```
+
+### Capture Logs
+
+```bash
+# Show log output
+pytest --log-cli-level=DEBUG awx/main/tests/unit/
+
+# Capture logs to file
+pytest --log-file=test.log awx/main/tests/unit/
+```
+
+## Database Testing
+
+Pytest automatically manages test databases:
+
+```python
+@pytest.mark.django_db
+def test_with_database():
+    """Test that requires database access"""
+    user = User.objects.create(username="test")
+    assert User.objects.filter(username="test").exists()
+```
+
+### Database Reuse
+
+The `--reuse-db` flag (in pytest.ini) speeds up test runs by reusing the test database between runs.
+
+## Performance Testing
+
+### Test Execution Time
+
+```bash
+# Show slowest tests
+pytest --durations=10 awx/main/tests/unit/
+
+# Show all test durations
+pytest --durations=0 awx/main/tests/unit/
+```
+
+### Profiling Tests
+
+```bash
+# Profile test execution
+pytest --profile awx/main/tests/unit/
+
+# Profile and save results
+pytest --profile-svg awx/main/tests/unit/
+```
+
+## Next Steps
+
+- [Architecture Overview](/development/architecture-overview)
+- [Task Manager System](/development/task-manager)
+- [Contributing Guidelines](/development/contributing)

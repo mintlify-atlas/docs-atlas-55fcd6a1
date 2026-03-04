@@ -1,0 +1,485 @@
+---
+title: Workflows
+description: Understanding AWX Workflows and job orchestration
+---
+
+## What is a Workflow?
+
+A **Workflow** in AWX is a structured composition of job resources that enables complex automation scenarios. Workflows execute jobs in a specific order based on success/failure paths, allowing you to chain together multiple job templates, project updates, inventory updates, and even other workflows into sophisticated automation pipelines.
+
+<Info>
+Workflows transform simple automation tasks into powerful orchestration pipelines with conditional logic, parallel execution, and dependency management.
+</Info>
+
+## Core Concepts
+
+### Workflow Components
+
+From the WorkflowJobTemplate model (`awx/main/models/workflow.py:455-635`):
+
+A workflow consists of:
+
+1. **Workflow Job Template**: The reusable definition
+2. **Workflow Nodes**: Individual steps in the workflow
+3. **Node Relationships**: Success, failure, and always paths between nodes
+4. **Launch Configuration**: Variables and prompts
+5. **Approval Nodes**: Manual approval steps
+
+### Workflow Job Templates
+
+Key fields (`workflow.py:455-467`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | String | Workflow name (unique within organization) |
+| `description` | String | Optional description |
+| `organization` | ForeignKey | Organization that owns this workflow |
+| `extra_vars` | TextField | Global variables for all jobs in workflow |
+| `allow_simultaneous` | Boolean | Allow concurrent workflow executions |
+| `ask_variables_on_launch` | Boolean | Prompt for extra_vars at launch |
+| `ask_inventory_on_launch` | Boolean | Prompt for inventory at launch |
+| `ask_limit_on_launch` | Boolean | Prompt for limit at launch |
+| `ask_scm_branch_on_launch` | Boolean | Prompt for SCM branch at launch |
+| `survey_enabled` | Boolean | Enable survey for user input |
+| `survey_spec` | JSON | Survey definition |
+
+## Workflow Nodes
+
+Workflow nodes are the building blocks of workflows (`awx/main/models/workflow.py:64-235`):
+
+### Node Types
+
+A node can reference any of these unified job templates:
+- **Job Template**: Run an Ansible playbook
+- **Project Update**: Sync a project from SCM
+- **Inventory Update**: Sync an inventory source
+- **Workflow Job Template**: Nested workflow
+- **Workflow Approval**: Manual approval step
+
+### Node Relationships
+
+```python
+# From workflow.py:69-86
+success_nodes = models.ManyToManyField('self', blank=True, symmetrical=False, related_name='%(class)ss_success')
+failure_nodes = models.ManyToManyField('self', blank=True, symmetrical=False, related_name='%(class)ss_failure')
+always_nodes = models.ManyToManyField('self', blank=True, symmetrical=False, related_name='%(class)ss_always')
+all_parents_must_converge = models.BooleanField(
+    default=False, 
+    help_text=_("If enabled then the node will only run if all of the parent nodes have met the criteria to reach this node")
+)
+```
+
+<CardGroup cols={3}>
+  <Card title="Success Nodes" icon="check">
+    Executed when parent node succeeds
+  </Card>
+  <Card title="Failure Nodes" icon="xmark">
+    Executed when parent node fails
+  </Card>
+  <Card title="Always Nodes" icon="arrows-rotate">
+    Executed regardless of parent status
+  </Card>
+</CardGroup>
+
+### Node Convergence
+
+The `all_parents_must_converge` field controls execution logic:
+
+- **False** (default): Node runs if ANY parent's condition is met
+- **True**: Node runs only if ALL parents' conditions are met
+
+This enables complex AND/OR logic in workflow graphs.
+
+### Node Identifiers
+
+Nodes have an `identifier` field for tracking:
+
+```python
+# From workflow.py:183-188
+identifier = models.CharField(
+    max_length=512,
+    default=uuid4,
+    blank=False,
+    help_text=_('An identifier for this node that is unique within its workflow. It is copied to workflow job nodes corresponding to this node.'),
+)
+```
+
+Identifiers enable:
+- Idempotent node creation/updates
+- Tracking job nodes back to template nodes
+- Client-side workflow management
+
+## Workflow Execution
+
+When a workflow launches, it creates a **Workflow Job** (`awx/main/models/workflow.py:637-789`):
+
+### Execution Flow
+
+From `docs/workflow.md:110`:
+
+<Steps>
+  <Step title="Create Workflow Job">
+    Workflow job template creates a workflow job instance
+  </Step>
+  <Step title="Create Job Nodes">
+    Each template node creates a corresponding job node
+  </Step>
+  <Step title="Start Root Nodes">
+    Nodes with no parents begin execution
+  </Step>
+  <Step title="Follow Paths">
+    As jobs complete, appropriate child nodes execute based on status
+  </Step>
+  <Step title="Complete">
+    Workflow finishes when all decision trees complete
+  </Step>
+</Steps>
+
+### Node Job Creation
+
+When a node's turn comes, it creates a job:
+
+```python
+# From workflow.py:297-388
+def get_job_kwargs(self):
+    """
+    In advance of creating a new unified job as part of a workflow,
+    this method builds the attributes to use
+    """
+    data = {}
+    wj_special_vars = {}
+    wj_special_passwords = {}
+    ujt_obj = self.unified_job_template
+    if ujt_obj is not None:
+        node_prompts_data = self.prompts_dict(for_cls=ujt_obj.__class__)
+        wj_prompts_data = self.workflow_job.prompts_dict(for_cls=ujt_obj.__class__)
+        # ...
+        accepted_fields, ignored_fields, errors = ujt_obj._accept_or_ignore_job_kwargs(**node_prompts_data)
+        data.update(accepted_fields)
+```
+
+Job parameters come from:
+1. Node-level prompts (highest priority)
+2. Workflow job prompts
+3. Template defaults (lowest priority)
+
+## Workflow Variables
+
+Workflows have sophisticated variable handling:
+
+### Extra Variables
+
+From `docs/workflow.md:112`:
+
+```
+Workflow extra_vars > Node extra_vars > Job Template extra_vars
+```
+
+Workflow-level extra variables override node and job template variables.
+
+### Artifact Passing
+
+Jobs can pass data to downstream nodes using `set_stats`:
+
+```yaml
+- name: Register artifact
+  ansible.builtin.set_stats:
+    data:
+      deployment_id: "{{ deployment.id }}"
+      deployment_url: "https://app.example.com/{{ deployment.id }}"
+```
+
+Artifacts flow through the workflow:
+
+```python
+# From workflow.py:345-355
+aa_dict = {}
+is_root_node = True
+for parent_node in self.get_parent_nodes():
+    is_root_node = False
+    aa_dict.update(parent_node.ancestor_artifacts)
+    if parent_node.job:
+        aa_dict.update(parent_node.job.get_effective_artifacts(parents_set=set([self.workflow_job_id])))
+if aa_dict and not is_root_node:
+    self.ancestor_artifacts = aa_dict
+    self.save(update_fields=['ancestor_artifacts'])
+```
+
+Artifacts from parent nodes are merged and passed as extra_vars to child jobs.
+
+<Warning>
+Artifacts marked with `_ansible_no_log: true` have their keys replaced with `$hidden due to Ansible no_log flag$` to prevent exposure of sensitive data.
+</Warning>
+
+## Workflow Approvals
+
+Approval nodes pause workflow execution for manual approval (`awx/main/models/workflow.py:829-1017`):
+
+### Creating Approval Nodes
+
+```python
+# From workflow.py:236-241
+def create_approval_template(self, **kwargs):
+    approval_template = WorkflowApprovalTemplate(**kwargs)
+    approval_template.save()
+    self.unified_job_template = approval_template
+    self.save(update_fields=['unified_job_template'])
+    return approval_template
+```
+
+### Approval Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | String | Approval node name |
+| `description` | String | Approval description/instructions |
+| `timeout` | Integer | Timeout in seconds (0 = no timeout) |
+| `approved_or_denied_by` | ForeignKey | User who approved/denied |
+| `timed_out` | Boolean | Whether approval timed out |
+
+### Approval Actions
+
+Approvals can be approved or denied:
+
+```python
+# From workflow.py:901-917
+def approve(self, request=None):
+    self.status = 'successful'
+    self.approved_or_denied_by = get_current_user()
+    self.save()
+    self.send_approval_notification('approved')
+    self.websocket_emit_status(self.status)
+    ScheduleWorkflowManager().schedule()
+    return reverse('api:workflow_approval_approve', kwargs={'pk': self.pk}, request=request)
+
+def deny(self, request=None):
+    self.status = 'failed'
+    self.approved_or_denied_by = get_current_user()
+    self.save()
+    self.send_approval_notification('denied')
+    self.websocket_emit_status(self.status)
+    ScheduleWorkflowManager().schedule()
+    return reverse('api:workflow_approval_deny', kwargs={'pk': self.pk}, request=request)
+```
+
+Approved nodes continue to success path; denied nodes follow failure path.
+
+### Approval Permissions
+
+From `docs/workflow.md:82-93`:
+
+Users can approve if they are:
+- Superuser
+- Organization Admin
+- Workflow Admin
+- Assigned the approval role on the workflow
+
+## Nested Workflows
+
+Workflows can contain other workflows:
+
+```python
+# From workflow.py:64-70
+unified_job_template = models.ForeignKey(
+    'UnifiedJobTemplate',
+    related_name='%(class)ss',
+    blank=True,
+    null=True,
+    default=None,
+    on_delete=models.SET_NULL,
+)
+```
+
+This enables:
+- Reusable workflow components
+- Complex multi-level orchestration
+- Recursion detection (AWX prevents infinite loops)
+
+From `docs/workflow.md:72-74`:
+> In the event that spawning the workflow would result in recursion, the child workflow will be marked as failed with a message explaining that recursion was detected.
+
+## Job Slicing in Workflows
+
+Workflows support job slicing:
+
+```python
+# From workflow.py:382-388
+if 'job_slice' in self.ancestor_artifacts and is_root_node:
+    data['_eager_fields']['allow_simultaneous'] = True
+    data['_eager_fields']['job_slice_number'] = self.ancestor_artifacts['job_slice']
+    data['_eager_fields']['job_slice_count'] = self.workflow_job.workflow_job_nodes.count()
+    data['_prevent_slicing'] = True
+```
+
+When a job template with `job_slice_count > 1` is launched, it creates a workflow job with slice nodes.
+
+## API Endpoints
+
+### List Workflow Job Templates
+```http
+GET /api/v2/workflow_job_templates/
+```
+
+### Create Workflow Job Template
+```http
+POST /api/v2/workflow_job_templates/
+Content-Type: application/json
+
+{
+  "name": "Deploy Application",
+  "description": "Full deployment workflow",
+  "organization": 1,
+  "extra_vars": "---\napp_version: 1.0.0",
+  "ask_variables_on_launch": true
+}
+```
+
+### Create Workflow Node
+```http
+POST /api/v2/workflow_job_templates/{id}/workflow_nodes/
+Content-Type: application/json
+
+{
+  "unified_job_template": 5,
+  "identifier": "deploy-backend",
+  "extra_data": {
+    "service": "backend"
+  }
+}
+```
+
+### Link Nodes
+```http
+POST /api/v2/workflow_job_template_nodes/{id}/success_nodes/
+Content-Type: application/json
+
+{
+  "id": 42
+}
+```
+
+### Create Approval Node
+```http
+POST /api/v2/workflow_job_template_nodes/{id}/create_approval_template/
+Content-Type: application/json
+
+{
+  "name": "Deploy to Production?",
+  "description": "Approve deployment to production environment",
+  "timeout": 3600
+}
+```
+
+### Launch Workflow
+```http
+POST /api/v2/workflow_job_templates/{id}/launch/
+Content-Type: application/json
+
+{
+  "extra_vars": {
+    "app_version": "1.2.3",
+    "environment": "production"
+  }
+}
+```
+
+### Approve Workflow Approval
+```http
+POST /api/v2/workflow_approvals/{id}/approve/
+```
+
+### Deny Workflow Approval
+```http
+POST /api/v2/workflow_approvals/{id}/deny/
+```
+
+## Workflow Status
+
+Workflow job status is determined by node outcomes:
+
+From `docs/workflow.md:133-134`:
+> A workflow job is marked as failed if a job spawned by a workflow job fails, without a failure handler. A failure handler is a `failure` or `always` link in the workflow job template.
+
+Status logic:
+- **Successful**: All execution paths completed successfully or handled failures
+- **Failed**: At least one node failed without a failure handler
+- **Canceled**: Workflow was canceled
+- **Error**: System error occurred
+
+## Permissions
+
+Workflow job templates have these roles (`workflow.py:481-504`):
+
+- **Admin Role**: Full control over workflow
+- **Execute Role**: Can launch workflows
+- **Approval Role**: Can approve approval nodes
+- **Read Role**: Can view workflow details
+
+<Tip>
+The approval role is separate from execute role, allowing you to designate specific approvers who may not have permission to launch workflows.
+</Tip>
+
+## Notifications
+
+Workflows support standard notifications plus approval notifications:
+
+```python
+# From workflow.py:536-561
+@property
+def notification_templates(self):
+    base_notification_templates = NotificationTemplate.objects.all()
+    error_notification_templates = list(base_notification_templates.filter(unifiedjobtemplate_notification_templates_for_errors__in=[self]))
+    started_notification_templates = list(base_notification_templates.filter(unifiedjobtemplate_notification_templates_for_started__in=[self]))
+    success_notification_templates = list(base_notification_templates.filter(unifiedjobtemplate_notification_templates_for_success__in=[self]))
+    approval_notification_templates = list(base_notification_templates.filter(workflowjobtemplate_notification_templates_for_approvals__in=[self]))
+```
+
+Notification types:
+- **Started**: Workflow job starts
+- **Success**: Workflow job succeeds
+- **Error**: Workflow job fails
+- **Approvals**: Approval node needs attention
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Design for Failure">
+    Always add failure handlers for critical paths. Use failure nodes to send notifications, roll back changes, or trigger remediation.
+  </Accordion>
+  
+  <Accordion title="Use Approval Nodes for Gates">
+    Add approval nodes before critical operations (production deployments, destructive changes) to ensure human oversight.
+  </Accordion>
+  
+  <Accordion title="Leverage Artifacts">
+    Use `set_stats` to pass data between jobs. This enables dynamic workflows that adapt based on upstream results.
+  </Accordion>
+  
+  <Accordion title="Keep Workflows Focused">
+    Create smaller, reusable workflows rather than one massive workflow. Use nested workflows for modularity.
+  </Accordion>
+  
+  <Accordion title="Use Convergence Wisely">
+    Set `all_parents_must_converge: true` only when you need AND logic. The default OR logic is more flexible.
+  </Accordion>
+  
+  <Accordion title="Test Thoroughly">
+    Test all paths (success, failure, always) to ensure workflows behave correctly in all scenarios.
+  </Accordion>
+</AccordionGroup>
+
+## Workflow Visualization
+
+From `docs/workflow.md:154-174`, AWX provides visual workflow execution tracking:
+
+- Root nodes start execution
+- Node colors indicate status (pending, running, successful, failed)
+- Paths show which branches executed
+- DNR (Do Not Run) marks nodes that won't execute
+
+## Related Resources
+
+- [Job Templates](/concepts/job-templates) - Build workflows from job templates
+- [Projects](/concepts/projects) - Source of playbooks for jobs in workflows
+- [Inventories](/concepts/inventories) - Target systems for workflow jobs
+- [Credentials](/concepts/credentials) - Authentication for workflow jobs

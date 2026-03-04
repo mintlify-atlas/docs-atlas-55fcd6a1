@@ -1,0 +1,129 @@
+---
+title: 'Installation Overview'
+description: 'Overview of AWX installation methods and deployment options'
+keywords: ['awx', 'installation', 'deployment', 'kubernetes', 'docker']
+icon: 'circle-info'
+---
+
+AWX provides a web-based user interface, REST API, and task engine built on top of Ansible. It is one of the upstream projects for Red Hat Ansible Automation Platform.
+
+<Warning>
+  The last release of the AWX repository was released on Jul 2, 2024. **Releases of this project are now paused during a large-scale refactoring.** For more information, follow [the Forum](https://forum.ansible.com/) and see the various communications about upcoming changes.
+</Warning>
+
+## Installation Methods
+
+AWX offers two primary installation methods, each designed for different use cases:
+
+<CardGroup cols={2}>
+  <Card title="AWX Operator" icon="kubernetes" href="/installation/awx-operator">
+    **Recommended for production**
+    
+    Deploy AWX on Kubernetes or OpenShift using the official AWX Operator. This is the preferred installation method for production environments.
+  </Card>
+  
+  <Card title="Docker Compose" icon="docker" href="/installation/docker-compose">
+    **Development and testing only**
+    
+    Run AWX locally using Docker Compose. This method is designed for development, testing, and demonstration purposes only.
+  </Card>
+</CardGroup>
+
+## Which Method Should I Choose?
+
+<Tabs>
+  <Tab title="Production Deployment">
+    **Use AWX Operator**
+    
+    If you need a production-ready AWX deployment with:
+    - High availability
+    - Scalability
+    - Enterprise-grade reliability
+    - Kubernetes/OpenShift infrastructure
+    
+    The AWX Operator is the official and recommended installation method starting from version 18.0.
+    
+    <Check>
+      The AWX Operator provides automated deployment, upgrades, and lifecycle management.
+    </Check>
+  </Tab>
+  
+  <Tab title="Development & Testing">
+    **Use Docker Compose**
+    
+    If you need a local AWX environment for:
+    - Development and debugging
+    - Testing AWX features
+    - Contributing to AWX
+    - Learning and experimentation
+    
+    The Docker Compose method provides a quick way to get AWX running locally with all dependencies.
+    
+    <Warning>
+      Docker Compose installations have no official published releases and should never be used in production.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Installation Version Notes
+
+<Info>
+  If you're installing an older release of AWX (prior to 18.0), the installation instructions have changed. For version-specific instructions, refer to the appropriate branch in the GitHub repository. For example, for AWX 17.0.1, see: [https://github.com/ansible/awx/blob/17.0.1/INSTALL.md](https://github.com/ansible/awx/blob/17.0.1/INSTALL.md)
+</Info>
+
+### Migration from Local Docker
+
+If you're attempting to migrate an older Docker-based AWX installation (version 17.0.1 or earlier), see the [data migration documentation](https://github.com/ansible/awx/blob/devel/tools/docker-compose/docs/data_migration.md) for instructions on migrating to the development environment.
+
+## System Requirements
+
+Before proceeding with installation, ensure your system meets the necessary requirements:
+
+<Card title="Requirements" icon="list-check" href="/installation/requirements">
+  Review system requirements, dependencies, and prerequisites for both installation methods.
+</Card>
+
+## Next Steps
+
+<Steps>
+  <Step title="Review requirements">
+    Check the [requirements page](/installation/requirements) to ensure your system meets all prerequisites.
+  </Step>
+  
+  <Step title="Choose installation method">
+    Select either [AWX Operator](/installation/awx-operator) for production or [Docker Compose](/installation/docker-compose) for development.
+  </Step>
+  
+  <Step title="Install AWX">
+    Follow the detailed installation guide for your chosen method.
+  </Step>
+  
+  <Step title="Install AWX CLI (Optional)">
+    Install the AWX command-line interface for automation and scripting.
+    
+    ```bash
+    pip3 install awxkit
+    awx --help
+    ```
+  </Step>
+</Steps>
+
+## Additional Resources
+
+- [AWX Documentation](https://docs.ansible.com/projects/awx/en/latest/)
+- [AWX Project FAQ](https://www.ansible.com/awx-project-faq)
+- [AWX GitHub Repository](https://github.com/ansible/awx)
+- [Ansible Forum - AWX Tag](https://forum.ansible.com/tag/awx)
+- [Contributing to AWX](https://github.com/ansible/awx/blob/devel/CONTRIBUTING.md)
+
+## Getting Help
+
+If you need assistance with AWX installation or configuration:
+
+- **Community Forum**: Create a topic using the [AWX tag on the Ansible Forum](https://forum.ansible.com/tag/awx)
+- **Matrix Chat**: Join the [Ansible Community Matrix](https://chat.ansible.im/#/welcome)
+- **GitHub Issues**: Report bugs or request features on the [AWX GitHub repository](https://github.com/ansible/awx/issues)
+
+<Note>
+  For a full list of all the ways to communicate with the Ansible Community, see the [AWX Communication guide](https://docs.ansible.com/projects/awx/en/latest/contributor/communication.html).
+</Note>

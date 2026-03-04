@@ -1,0 +1,545 @@
+---
+title: 'Jobs'
+description: 'Monitor and manage AWX jobs via the API'
+---
+
+## Overview
+
+Jobs are instances of job templates that have been launched. They represent the execution of an Ansible playbook with specific parameters. Jobs are read-only except for cancellation.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/jobs/` | List jobs |
+| GET | `/api/v2/jobs/{id}/` | Retrieve job details |
+| POST | `/api/v2/jobs/{id}/cancel/` | Cancel running job |
+| POST | `/api/v2/jobs/{id}/relaunch/` | Relaunch job |
+| GET | `/api/v2/jobs/{id}/stdout/` | Get job output |
+| GET | `/api/v2/jobs/{id}/job_events/` | List job events |
+
+## List Jobs
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/jobs/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ParamField query="status" type="string">
+  Filter by status: `new`, `pending`, `waiting`, `running`, `successful`, `failed`, `error`, `canceled`
+</ParamField>
+
+<ParamField query="job_type" type="string">
+  Filter by type: `run` or `check`
+</ParamField>
+
+## Retrieve Job
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/jobs/123/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Response Schema
+
+<ResponseField name="id" type="integer">
+  Job ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Job name (from template)
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Job description
+</ResponseField>
+
+<ResponseField name="job_type" type="string">
+  Job type: `run` or `check`
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current status: `new`, `pending`, `waiting`, `running`, `successful`, `failed`, `error`, `canceled`
+</ResponseField>
+
+<ResponseField name="failed" type="boolean">
+  Whether job failed
+</ResponseField>
+
+<ResponseField name="started" type="string">
+  Start timestamp
+</ResponseField>
+
+<ResponseField name="finished" type="string">
+  Completion timestamp
+</ResponseField>
+
+<ResponseField name="canceled_on" type="string">
+  Cancellation timestamp
+</ResponseField>
+
+<ResponseField name="elapsed" type="number">
+  Elapsed time in seconds
+</ResponseField>
+
+<ResponseField name="job_explanation" type="string">
+  Explanation for job status
+</ResponseField>
+
+<ResponseField name="execution_node" type="string">
+  Node where job executed
+</ResponseField>
+
+<ResponseField name="controller_node" type="string">
+  Controller node
+</ResponseField>
+
+<ResponseField name="launch_type" type="string">
+  How job was launched: `manual`, `relaunch`, `callback`, `scheduled`, `dependency`, `workflow`, `webhook`, `sync`, `scm`
+</ResponseField>
+
+<ResponseField name="playbook" type="string">
+  Playbook that was executed
+</ResponseField>
+
+<ResponseField name="scm_revision" type="string">
+  SCM revision used
+</ResponseField>
+
+<ResponseField name="scm_branch" type="string">
+  SCM branch used
+</ResponseField>
+
+<ResponseField name="inventory" type="integer">
+  Inventory ID
+</ResponseField>
+
+<ResponseField name="project" type="integer">
+  Project ID
+</ResponseField>
+
+<ResponseField name="job_template" type="integer">
+  Job template ID
+</ResponseField>
+
+<ResponseField name="limit" type="string">
+  Host limit
+</ResponseField>
+
+<ResponseField name="extra_vars" type="string">
+  Extra variables (displayed, sensitive values hidden)
+</ResponseField>
+
+<ResponseField name="artifacts" type="object">
+  Artifacts set by the job
+</ResponseField>
+
+<ResponseField name="forks" type="integer">
+  Number of forks used
+</ResponseField>
+
+<ResponseField name="verbosity" type="integer">
+  Verbosity level
+</ResponseField>
+
+<ResponseField name="job_tags" type="string">
+  Tags applied
+</ResponseField>
+
+<ResponseField name="skip_tags" type="string">
+  Tags skipped
+</ResponseField>
+
+<ResponseField name="timeout" type="integer">
+  Job timeout
+</ResponseField>
+
+<ResponseField name="diff_mode" type="boolean">
+  Whether diff mode was enabled
+</ResponseField>
+
+<ResponseField name="use_fact_cache" type="boolean">
+  Whether fact cache was used
+</ResponseField>
+
+<ResponseField name="allow_simultaneous" type="boolean">
+  Whether simultaneous execution is allowed
+</ResponseField>
+
+<ResponseField name="job_slice_number" type="integer">
+  Slice number (for distributed jobs)
+</ResponseField>
+
+<ResponseField name="job_slice_count" type="integer">
+  Total number of slices
+</ResponseField>
+
+<ResponseField name="webhook_service" type="string">
+  Webhook service that triggered job
+</ResponseField>
+
+<ResponseField name="webhook_guid" type="string">
+  Webhook GUID
+</ResponseField>
+
+<ResponseField name="related" type="object">
+  Links to related resources:
+  - `job_template` - Source template
+  - `inventory` - Job inventory
+  - `project` - Source project
+  - `execution_environment` - Execution environment
+  - `credentials` - Credentials used
+  - `labels` - Job labels
+  - `job_events` - Playbook events
+  - `job_host_summaries` - Host summaries
+  - `activity_stream` - Activity log
+  - `notifications` - Notifications sent
+  - `cancel` - Cancel endpoint
+  - `relaunch` - Relaunch endpoint
+  - `create_schedule` - Create schedule from job
+</ResponseField>
+
+## Job Output
+
+### Get Standard Output
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/jobs/123/stdout/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Returns full Ansible playbook output.
+
+### Get Formatted Output
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/jobs/123/stdout/?format=txt" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ParamField query="format" type="string" default="html">
+  Output format: `html`, `txt`, `ansi`, `json`
+</ParamField>
+
+<ParamField query="download" type="boolean">
+  Download as file attachment
+</ParamField>
+
+## Job Events
+
+List detailed playbook events:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/jobs/123/job_events/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Events include:
+- `playbook_on_start`
+- `playbook_on_play_start`
+- `playbook_on_task_start`
+- `runner_on_ok`
+- `runner_on_failed`
+- `runner_on_skipped`
+- `runner_on_unreachable`
+- `playbook_on_stats`
+- And many more...
+
+### Children Summary
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/jobs/123/job_events/children_summary/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Job Host Summaries
+
+Get per-host execution summary:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/jobs/123/job_host_summaries/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Response includes per-host:
+- `ok` - Successful tasks
+- `changed` - Tasks that made changes
+- `dark` - Unreachable hosts
+- `failures` - Failed tasks
+- `skipped` - Skipped tasks
+
+## Cancel Job
+
+Cancel a running or pending job:
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/jobs/123/cancel/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<Info>
+  Only jobs in `new`, `pending`, `waiting`, or `running` status can be canceled.
+</Info>
+
+## Relaunch Job
+
+Relaunch a job with the same parameters:
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/jobs/123/relaunch/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Returns a new job object.
+
+## Create Schedule from Job
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/jobs/123/create_schedule/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Daily Deploy",
+    "description": "Deploy daily at 2 AM",
+    "rrule": "DTSTART:20240101T020000Z RRULE:FREQ=DAILY;INTERVAL=1"
+  }'
+```
+
+## Job Labels
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/jobs/123/labels/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Job Notifications
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/jobs/123/notifications/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Activity Stream
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/jobs/123/activity_stream/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Filtering Jobs
+
+```bash
+# By status
+?status=successful
+?status__in=pending,waiting,running
+
+# By job type
+?job_type=run
+
+# By template
+?job_template=10
+
+# By inventory
+?inventory=3
+
+# By project
+?project=5
+
+# By date range
+?created__gte=2024-01-01
+?finished__lte=2024-12-31
+
+# Failed jobs
+?failed=true
+
+# By launch type
+?launch_type=scheduled
+
+# By playbook
+?playbook=site.yml
+```
+
+## Ordering
+
+```bash
+# By start time (most recent first)
+?order_by=-started
+
+# By finish time
+?order_by=-finished
+
+# By status
+?order_by=status
+
+# By elapsed time
+?order_by=-elapsed
+```
+
+## Monitoring Running Jobs
+
+### Poll Job Status
+
+```python
+import requests
+import time
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+job_id = 123
+
+while True:
+    response = requests.get(
+        f"{base_url}/jobs/{job_id}/",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    
+    job = response.json()
+    status = job['status']
+    
+    print(f"Status: {status}, Elapsed: {job.get('elapsed', 0)}s")
+    
+    if status in ['successful', 'failed', 'error', 'canceled']:
+        print(f"Job finished: {status}")
+        break
+    
+    time.sleep(2)
+```
+
+### Stream Job Events
+
+```python
+import requests
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+job_id = 123
+
+# Get events with limit for real-time streaming
+url = f"{base_url}/jobs/{job_id}/job_events/?order_by=counter"
+headers = {"Authorization": f"Bearer {token}"}
+
+last_counter = 0
+
+while True:
+    response = requests.get(
+        f"{url}&counter__gt={last_counter}",
+        headers=headers
+    )
+    
+    data = response.json()
+    events = data.get('results', [])
+    
+    for event in events:
+        print(f"[{event['event']}] {event.get('stdout', '')}")
+        last_counter = max(last_counter, event['counter'])
+    
+    if not events:
+        # Check if job is done
+        job = requests.get(
+            f"{base_url}/jobs/{job_id}/",
+            headers=headers
+        ).json()
+        
+        if job['status'] not in ['pending', 'waiting', 'running']:
+            break
+    
+    time.sleep(1)
+```
+
+## Job Statistics
+
+Jobs track execution statistics:
+
+```json
+{
+  "ok": 12,
+  "changed": 5,
+  "dark": 0,
+  "failures": 0,
+  "skipped": 3,
+  "rescued": 0,
+  "ignored": 0
+}
+```
+
+These are available in the job detail response and in job_host_summaries.
+
+## Complete Example
+
+```python
+import requests
+import json
+import time
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Launch job from template
+launch_response = requests.post(
+    f"{base_url}/job_templates/10/launch/",
+    headers=headers,
+    data=json.dumps({"limit": "web*"})
+)
+
+if launch_response.status_code in [201, 202]:
+    job = launch_response.json()
+    job_id = job['id']
+    print(f"Launched job {job_id}")
+    
+    # Monitor job
+    while True:
+        job_response = requests.get(
+            f"{base_url}/jobs/{job_id}/",
+            headers=headers
+        )
+        job = job_response.json()
+        
+        print(f"Status: {job['status']}, Elapsed: {job.get('elapsed', 0)}s")
+        
+        if job['status'] in ['successful', 'failed', 'error', 'canceled']:
+            print(f"\\nJob {job['status']}")
+            
+            # Get summary
+            if job['status'] == 'successful':
+                summaries = requests.get(
+                    f"{base_url}/jobs/{job_id}/job_host_summaries/",
+                    headers=headers
+                ).json()
+                
+                print(f"Hosts processed: {summaries['count']}")
+                for summary in summaries['results']:
+                    host = summary['summary_fields']['host']['name']
+                    print(f"  {host}: ok={summary['ok']}, changed={summary['changed']}, failed={summary['failures']}")
+            
+            # Get output
+            stdout = requests.get(
+                f"{base_url}/jobs/{job_id}/stdout/?format=txt",
+                headers=headers
+            ).text
+            
+            print(f"\\nOutput:\\n{stdout[:500]}...")
+            
+            break
+        
+        time.sleep(3)
+else:
+    print(f"Error launching job: {launch_response.status_code}")
+    print(launch_response.json())
+```

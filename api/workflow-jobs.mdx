@@ -1,0 +1,210 @@
+---
+title: 'Workflow Jobs'
+description: 'Monitor AWX workflow job executions via the API'
+---
+
+## Overview
+
+Workflow jobs are instances of workflow job templates that have been executed. They contain multiple workflow job nodes, each representing a job, project update, or inventory update.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/workflow_jobs/` | List workflow jobs |
+| GET | `/api/v2/workflow_jobs/{id}/` | Retrieve workflow job |
+| POST | `/api/v2/workflow_jobs/{id}/cancel/` | Cancel workflow |
+| POST | `/api/v2/workflow_jobs/{id}/relaunch/` | Relaunch workflow |
+
+## List Workflow Jobs
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_jobs/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Retrieve Workflow Job
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_jobs/50/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ResponseField name="id" type="integer">
+  Workflow job ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Workflow job name
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Status: `new`, `pending`, `waiting`, `running`, `successful`, `failed`, `error`, `canceled`
+</ResponseField>
+
+<ResponseField name="started" type="string">
+  Start timestamp
+</ResponseField>
+
+<ResponseField name="finished" type="string">
+  Completion timestamp
+</ResponseField>
+
+<ResponseField name="elapsed" type="number">
+  Elapsed time in seconds
+</ResponseField>
+
+<ResponseField name="workflow_job_template" type="integer">
+  Source workflow template ID
+</ResponseField>
+
+<ResponseField name="launch_type" type="string">
+  How workflow was launched: `manual`, `relaunch`, `scheduled`, `dependency`, `webhook`
+</ResponseField>
+
+<ResponseField name="extra_vars" type="string">
+  Extra variables used
+</ResponseField>
+
+<ResponseField name="related" type="object">
+  Links to related resources:
+  - `workflow_job_template` - Source template
+  - `workflow_nodes` - Workflow execution nodes
+  - `labels` - Job labels
+  - `activity_stream` - Activity log
+  - `notifications` - Notifications sent
+  - `cancel` - Cancel endpoint
+  - `relaunch` - Relaunch endpoint
+</ResponseField>
+
+## Workflow Nodes
+
+Get the execution graph:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_jobs/50/workflow_nodes/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Each node includes:
+- **id** - Node ID
+- **job** - Associated job/update ID
+- **unified_job_template** - Template that was executed
+- **identifier** - Node identifier
+- **do_not_run** - Whether node was skipped
+- **success** - Whether node succeeded
+- **failed** - Whether node failed
+- **related.success_nodes** - Nodes executed on success
+- **related.failure_nodes** - Nodes executed on failure
+- **related.always_nodes** - Nodes always executed
+
+## Cancel Workflow
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_jobs/50/cancel/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Cancels all running jobs in the workflow.
+
+## Relaunch Workflow
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_jobs/50/relaunch/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Labels
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_jobs/50/labels/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Notifications
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_jobs/50/notifications/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Activity Stream
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/workflow_jobs/50/activity_stream/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Filtering
+
+```bash
+# By status
+?status=successful
+
+# By workflow template
+?workflow_job_template=5
+
+# By date range
+?created__gte=2024-01-01
+
+# By launch type
+?launch_type=scheduled
+```
+
+## Monitor Workflow Execution
+
+```python
+import requests
+import time
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {"Authorization": f"Bearer {token}"}
+workflow_job_id = 50
+
+def get_workflow_status():
+    response = requests.get(
+        f"{base_url}/workflow_jobs/{workflow_job_id}/",
+        headers=headers
+    )
+    return response.json()
+
+def get_workflow_nodes():
+    response = requests.get(
+        f"{base_url}/workflow_jobs/{workflow_job_id}/workflow_nodes/",
+        headers=headers
+    )
+    return response.json()['results']
+
+# Monitor workflow
+while True:
+    workflow = get_workflow_status()
+    status = workflow['status']
+    
+    print(f"Workflow status: {status}")
+    
+    # Get node statuses
+    nodes = get_workflow_nodes()
+    for node in nodes:
+        node_status = "pending"
+        if node.get('job'):
+            node_status = "completed"
+        if node.get('do_not_run'):
+            node_status = "skipped"
+        
+        print(f"  Node {node['identifier']}: {node_status}")
+    
+    if status in ['successful', 'failed', 'error', 'canceled']:
+        print(f"\nWorkflow finished: {status}")
+        break
+    
+    time.sleep(5)
+```

@@ -1,0 +1,394 @@
+---
+title: Inventories
+description: Understanding AWX Inventories and host management
+---
+
+## What is an Inventory?
+
+An **Inventory** in AWX is a collection of hosts that Ansible can manage. Inventories organize hosts into groups, define host and group variables, and can be synchronized from external sources. They are the foundation of AWX's infrastructure management capabilities.
+
+<Info>
+Think of inventories as your infrastructure database - they define what systems you can automate against and how they're organized.
+</Info>
+
+## Inventory Types
+
+AWX supports three types of inventories (`awx/main/models/inventory.py:77-81`):
+
+### Standard Inventory
+
+The default type where hosts are directly linked to the inventory. Hosts can be added manually or through inventory sources.
+
+### Smart Inventory
+
+A dynamic inventory that uses a filter to automatically include hosts from other inventories:
+
+```python
+kind = 'smart'
+host_filter = 'ansible_facts__ansible_os_family="RedHat"'
+```
+
+Smart inventories evaluate the `host_filter` field to determine membership dynamically.
+
+### Constructed Inventory
+
+Parses multiple source inventories using the constructed inventory plugin to create a unified view:
+
+```python
+kind = 'constructed'
+input_inventories = [inventory1, inventory2, inventory3]
+```
+
+Constructed inventories automatically create an inventory source of type `constructed` that processes the input inventories.
+
+## Key Fields
+
+From the Inventory model (`awx/main/models/inventory.py:71`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | String | Inventory name (unique within organization) |
+| `description` | String | Optional description |
+| `organization` | ForeignKey | Organization that owns this inventory |
+| `kind` | Choice | Inventory type: `''` (standard), `smart`, or `constructed` |
+| `host_filter` | SmartFilterField | Filter for smart inventories |
+| `input_inventories` | ManyToMany | Source inventories for constructed inventories |
+| `variables` | TextField | Inventory-level variables (JSON or YAML) |
+| `instance_groups` | ManyToMany | Instance groups to run jobs against this inventory |
+| `prevent_instance_group_fallback` | Boolean | Prevent falling back to organization instance groups |
+
+## Hosts
+
+Hosts are individual systems managed by AWX (`awx/main/models/inventory.py:509-656`):
+
+### Host Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | String | Hostname or IP address (unique within inventory) |
+| `description` | String | Optional description |
+| `inventory` | ForeignKey | Parent inventory |
+| `enabled` | Boolean | Whether host is available for jobs |
+| `instance_id` | String | Unique ID from inventory source |
+| `variables` | TextField | Host variables (JSON or YAML) |
+| `ansible_facts` | JSON | Cached Ansible facts |
+
+### Host Variables
+
+Hosts can have variables defined in JSON or YAML format:
+
+```yaml
+ansible_host: 192.168.1.100
+ansible_user: admin
+ansible_port: 2222
+app_environment: production
+```
+
+Special variables like `ansible_host` override the host name for connections:
+
+```python
+# From inventory.py:613-623
+def get_effective_host_name(self):
+    """
+    Return the name of the host that will be used in actual ansible
+    command run.
+    """
+    host_name = self.name
+    if 'ansible_ssh_host' in self.variables_dict:
+        host_name = self.variables_dict['ansible_ssh_host']
+    if 'ansible_host' in self.variables_dict:
+        host_name = self.variables_dict['ansible_host']
+    return host_name
+```
+
+## Groups
+
+Groups organize hosts into logical collections (`awx/main/models/inventory.py:658-863`):
+
+### Group Structure
+
+Groups can contain:
+- Hosts (many-to-many relationship)
+- Child groups (hierarchical structure)
+- Variables that apply to all members
+
+### Group Hierarchy
+
+```python
+# From inventory.py:772-788
+def get_all_parents(self, except_pks=None):
+    """
+    Return all parents of this group recursively.  The group itself will
+    be excluded unless there is a cycle leading back to it.
+    """
+    group_parents_map = self.inventory.get_group_parents_map()
+    child_pks_to_check = set([self.pk])
+    child_pks_checked = set()
+    parent_pks = set()
+    while child_pks_to_check:
+        for child_pk in list(child_pks_to_check):
+            p_ids = group_parents_map.get(child_pk, set())
+            parent_pks.update(p_ids)
+            child_pks_to_check.remove(child_pk)
+            child_pks_checked.add(child_pk)
+            child_pks_to_check.update(p_ids - child_pks_checked)
+    return Group.objects.filter(pk__in=parent_pks).distinct()
+```
+
+Groups can have multiple parents, creating complex hierarchies.
+
+## Inventory Sources
+
+Inventory sources sync hosts from external systems (`awx/main/models/inventory.py:1082`):
+
+### Supported Source Types
+
+- **Amazon EC2**: Sync from AWS EC2 instances
+- **Google Compute Engine**: Sync from GCP
+- **Microsoft Azure**: Sync from Azure VMs
+- **VMware vCenter**: Sync from VMware
+- **Red Hat Satellite**: Sync from Satellite
+- **OpenStack**: Sync from OpenStack
+- **Ansible Tower/AWX**: Sync from another AWX instance
+- **Custom Script**: Run custom inventory script
+- **SCM**: Pull inventory from a project
+- **Constructed**: Process input inventories
+
+### Inventory Source Configuration
+
+```python
+# From inventory.py:909-1042
+class InventorySourceOptions(BaseModel):
+    source = models.CharField(max_length=32, blank=False, default=None)
+    source_path = models.CharField(max_length=1024, blank=True, default='')
+    source_vars = models.TextField(blank=True, default='', help_text=_('Inventory source variables in YAML or JSON format.'))
+    scm_branch = models.CharField(max_length=1024, default='', blank=True)
+    enabled_var = models.TextField(blank=True, default='')
+    enabled_value = models.TextField(blank=True, default='')
+    overwrite = models.BooleanField(default=False, help_text=_('Overwrite local groups and hosts from remote inventory source.'))
+    overwrite_vars = models.BooleanField(default=False, help_text=_('Overwrite local variables from remote inventory source.'))
+    update_on_launch = models.BooleanField(default=False)
+    update_cache_timeout = models.PositiveIntegerField(default=0)
+```
+
+### Update on Launch
+
+Like projects, inventory sources can update automatically:
+
+```python
+# From inventory.py:1218-1225
+@property
+def needs_update_on_launch(self):
+    if self.source and self.update_on_launch:
+        if not self.last_job_run:
+            return True
+        if (self.last_job_run + datetime.timedelta(seconds=self.update_cache_timeout)) <= now():
+            return True
+    return False
+```
+
+## Inventory Script Output
+
+AWX generates dynamic inventory in Ansible's JSON format:
+
+```python
+# From inventory.py:300-380
+def get_script_data(self, hostvars=False, towervars=False, show_all=False, slice_number=1, slice_count=1):
+    # Returns JSON structure:
+    # {
+    #   "all": {
+    #     "hosts": ["host1", "host2"],
+    #     "vars": {"inventory_var": "value"},
+    #     "children": ["group1", "group2"]
+    #   },
+    #   "group1": {
+    #     "hosts": ["host1"],
+    #     "vars": {"group_var": "value"}
+    #   },
+    #   "_meta": {
+    #     "hostvars": {
+    #       "host1": {"host_var": "value"}
+    #     }
+    #   }
+    # }
+```
+
+This format is used internally by AWX when running playbooks.
+
+## Job Slicing
+
+Inventories support job slicing for parallel execution:
+
+```python
+# From inventory.py:281-298
+def get_sliced_hosts(self, host_queryset, slice_number, slice_count):
+    """
+    Returns a slice of Hosts given a slice number and total slice count, or
+    the original queryset if slicing is not requested.
+    """
+    if slice_count > 1 and slice_number > 0:
+        offset = slice_number - 1
+        host_queryset = host_queryset[offset::slice_count]
+    return host_queryset
+```
+
+When a job template has `job_slice_count > 1`, AWX distributes hosts across multiple parallel jobs.
+
+## Smart Inventory Filters
+
+Smart inventories use a powerful filtering system:
+
+```python
+# Example filters
+ansible_facts__ansible_distribution="Ubuntu"
+name__startswith="web"
+groups__name="production" and ansible_facts__ansible_processor_count__gte=4
+enabled=true
+```
+
+<Warning>
+Smart inventory filters are evaluated against the database. Very complex filters may impact performance.
+</Warning>
+
+## API Endpoints
+
+### List Inventories
+```http
+GET /api/v2/inventories/
+```
+
+### Create Inventory
+```http
+POST /api/v2/inventories/
+Content-Type: application/json
+
+{
+  "name": "Production Servers",
+  "organization": 1,
+  "variables": "---\nansible_user: deploy\nansible_become: true"
+}
+```
+
+### Create Smart Inventory
+```http
+POST /api/v2/inventories/
+Content-Type: application/json
+
+{
+  "name": "Ubuntu Servers",
+  "organization": 1,
+  "kind": "smart",
+  "host_filter": "ansible_facts__ansible_distribution=\"Ubuntu\""
+}
+```
+
+### Add Host
+```http
+POST /api/v2/inventories/{id}/hosts/
+Content-Type: application/json
+
+{
+  "name": "web01.example.com",
+  "variables": {
+    "ansible_host": "192.168.1.10",
+    "app_environment": "production"
+  }
+}
+```
+
+### Create Group
+```http
+POST /api/v2/inventories/{id}/groups/
+Content-Type: application/json
+
+{
+  "name": "webservers",
+  "variables": {
+    "nginx_worker_processes": 4
+  }
+}
+```
+
+### Add Inventory Source
+```http
+POST /api/v2/inventories/{id}/inventory_sources/
+Content-Type: application/json
+
+{
+  "name": "AWS EC2 Sync",
+  "source": "ec2",
+  "credential": 5,
+  "overwrite": true,
+  "update_on_launch": true,
+  "update_cache_timeout": 300
+}
+```
+
+### Update Inventory Source
+```http
+POST /api/v2/inventory_sources/{id}/update/
+```
+
+## Permissions
+
+Inventories have the following roles (`inventory.py:171-190`):
+
+- **Admin Role**: Full control over inventory
+- **Update Role**: Can trigger inventory source updates
+- **Ad Hoc Role**: Can run ad hoc commands
+- **Use Role**: Can use inventory in job templates
+- **Read Role**: Can view inventory details
+
+<Tip>
+The `use` permission is required to select an inventory in a job template. The `adhoc` permission is required to run ad hoc commands.
+</Tip>
+
+## Host Metrics
+
+AWX tracks host automation metrics for licensing:
+
+```python
+# From inventory.py:865-894
+class HostMetric(models.Model):
+    hostname = models.CharField(unique=True, max_length=512)
+    first_automation = models.DateTimeField(auto_now_add=True, null=False, db_index=True)
+    last_automation = models.DateTimeField(db_index=True)
+    last_deleted = models.DateTimeField(null=True, db_index=True)
+    automated_counter = models.BigIntegerField(default=0)
+    deleted_counter = models.IntegerField(default=0)
+    deleted = models.BooleanField(default=False)
+    used_in_inventories = models.IntegerField(null=True)
+```
+
+Host metrics track automation activity across all inventories.
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Groups for Organization">
+    Organize hosts into logical groups (e.g., webservers, databases, production) to simplify variable management and job targeting.
+  </Accordion>
+  
+  <Accordion title="Leverage Inventory Sources">
+    Use inventory sources to sync from cloud providers rather than manually maintaining hosts. This ensures accuracy and reduces maintenance.
+  </Accordion>
+  
+  <Accordion title="Smart Inventories for Dynamic Groups">
+    Use smart inventories to create dynamic views of your infrastructure based on facts or properties.
+  </Accordion>
+  
+  <Accordion title="Enable Host Facts">
+    Use `use_fact_cache` in job templates to cache Ansible facts. These facts can be used in smart inventory filters.
+  </Accordion>
+  
+  <Accordion title="Set Variables at Appropriate Levels">
+    Place variables at the most appropriate level: inventory-wide variables in the inventory, group-specific in groups, and host-specific in hosts.
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+- [Job Templates](/concepts/job-templates) - Use inventories in job templates
+- [Credentials](/concepts/credentials) - Configure inventory source credentials
+- [Organizations](/guides/organizations-and-teams) - Organize inventories by organization
+- [Hosts](/api/hosts) - Host management API

@@ -1,0 +1,720 @@
+---
+title: 'System Requirements'
+description: 'Prerequisites and requirements for installing AWX'
+keywords: ['awx', 'requirements', 'prerequisites', 'dependencies', 'python', 'system']
+icon: 'list-check'
+---
+
+Before installing AWX, ensure your system meets the necessary requirements. Requirements vary depending on your chosen installation method.
+
+## Installation Method Requirements
+
+Choose the requirements section that matches your installation method:
+
+<CardGroup cols={2}>
+  <Card title="AWX Operator Requirements" icon="kubernetes" href="#awx-operator-requirements">
+    Requirements for Kubernetes/OpenShift production deployments
+  </Card>
+  
+  <Card title="Docker Compose Requirements" icon="docker" href="#docker-compose-requirements">
+    Requirements for local development environments
+  </Card>
+</CardGroup>
+
+## AWX Operator Requirements
+
+For production deployments using the [AWX Operator](/installation/awx-operator):
+
+### Kubernetes Cluster
+
+<AccordionGroup>
+  <Accordion title="Kubernetes Version">
+    - **Minimum**: Kubernetes 1.21 or later
+    - **Recommended**: Kubernetes 1.25+ or OpenShift 4.10+
+    - **Supported**: Any CNCF-certified Kubernetes distribution
+    
+    <Info>
+      The AWX Operator is tested against recent Kubernetes releases. Check the [operator compatibility matrix](https://github.com/ansible/awx-operator#compatibility-matrix) for specific version support.
+    </Info>
+  </Accordion>
+  
+  <Accordion title="Cluster Resources">
+    Minimum resource requirements per AWX instance:
+    
+    | Component     | CPU (cores) | Memory (GB) | Storage (GB) |
+    |---------------|-------------|-------------|---------------|
+    | AWX Web       | 0.5         | 1           | -             |
+    | AWX Task      | 0.5         | 2           | -             |
+    | PostgreSQL    | 0.5         | 2           | 20            |
+    | Redis         | 0.25        | 1           | -             |
+    | **Total**     | **1.75**    | **6**       | **20**        |
+    
+    <Tip>
+      Recommended production resources: 4 CPU cores, 16GB RAM, 100GB SSD storage for PostgreSQL
+    </Tip>
+    
+    Additional resources needed for:
+    - **Multiple replicas**: Multiply web and task resources by replica count
+    - **Job execution**: Jobs consume additional memory and CPU during execution
+    - **Projects storage**: Allocate 10-50GB for Ansible project files
+  </Accordion>
+  
+  <Accordion title="Storage Requirements">
+    - **StorageClass**: Dynamic volume provisioning support
+    - **Access Modes**: ReadWriteOnce (RWO) for database volumes
+    - **Performance**: SSD or high-performance storage recommended for PostgreSQL
+    - **Backup**: Additional storage for AWXBackup resources (size depends on data volume)
+    
+    Storage types:
+    - **PostgreSQL**: 20GB minimum, 100GB+ recommended for production
+    - **Projects**: 10GB minimum for Ansible playbooks and roles
+    - **Redis**: Ephemeral storage (typically not persistent)
+  </Accordion>
+  
+  <Accordion title="Networking Requirements">
+    - **Service Access**: LoadBalancer or Ingress controller for external access
+    - **DNS**: Internal DNS for service discovery
+    - **Egress**: Internet access for container image pulls and external integrations
+    - **Ports**:
+      - 80/443 (HTTP/HTTPS) - Web interface and API
+      - 27199 (TCP) - Receptor mesh network (for clustered deployments)
+    
+    <Info>
+      If using an Ingress controller, ensure TLS/SSL certificates are configured for secure access.
+    </Info>
+  </Accordion>
+  
+  <Accordion title="Container Registry Access">
+    Access required to pull container images from:
+    - `quay.io/ansible/awx` - AWX application image
+    - `quay.io/ansible/awx-operator` - AWX Operator image
+    - `quay.io/ansible/awx-ee` - Default execution environment images
+    - `docker.io` or `quay.io` - PostgreSQL and Redis images
+    
+    For air-gapped environments, mirror these images to a private registry.
+  </Accordion>
+</AccordionGroup>
+
+### Client Tools
+
+<Tabs>
+  <Tab title="kubectl">
+    **Kubernetes CLI** - Required for cluster interaction
+    
+    ```bash
+    # Install kubectl
+    # See: https://kubernetes.io/docs/tasks/tools/
+    
+    # Verify installation
+    kubectl version --client
+    
+    # Test cluster access
+    kubectl cluster-info
+    kubectl get nodes
+    ```
+    
+    Minimum version: 1.21 (should match cluster version ±1 minor version)
+  </Tab>
+  
+  <Tab title="oc (OpenShift)">
+    **OpenShift CLI** - Required for OpenShift clusters
+    
+    ```bash
+    # Download from OpenShift console or:
+    # https://mirror.openshift.com/pub/openshift-v4/clients/ocp/
+    
+    # Verify installation
+    oc version
+    
+    # Test cluster access
+    oc cluster-info
+    oc get nodes
+    ```
+    
+    The `oc` CLI includes all `kubectl` functionality plus OpenShift-specific commands.
+  </Tab>
+  
+  <Tab title="Kustomize">
+    **Kustomize** - For customizing Kubernetes manifests
+    
+    ```bash
+    # Kustomize is built into kubectl 1.14+
+    kubectl version --client | grep -i kustomize
+    
+    # Or install standalone
+    # See: https://kubectl.docs.kubernetes.io/installation/kustomize/
+    ```
+    
+    Used for deploying and customizing the AWX Operator.
+  </Tab>
+  
+  <Tab title="Helm (Optional)">
+    **Helm** - Alternative installation method
+    
+    ```bash
+    # Install Helm 3
+    # See: https://helm.sh/docs/intro/install/
+    
+    # Verify installation
+    helm version
+    ```
+    
+    Helm 3.0+ recommended for chart-based installations.
+  </Tab>
+</Tabs>
+
+### Permissions
+
+<Warning>
+  Cluster administrator permissions are required to:
+  - Install Custom Resource Definitions (CRDs)
+  - Create namespaces
+  - Configure RBAC roles and bindings
+  - Deploy the AWX Operator
+</Warning>
+
+After initial operator installation, regular users with appropriate RBAC can deploy AWX instances.
+
+## Docker Compose Requirements
+
+For development environments using [Docker Compose](/installation/docker-compose):
+
+### Software Prerequisites
+
+<AccordionGroup>
+  <Accordion title="Docker Engine">
+    **Version**: Docker 20.10 or later
+    
+    <Tabs>
+      <Tab title="Linux">
+        Install Docker CE from official repositories:
+        
+        ```bash
+        # Ubuntu/Debian
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sudo sh get-docker.sh
+        sudo usermod -aG docker $USER
+        
+        # Start Docker service
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        
+        # Verify
+        docker --version
+        docker run hello-world
+        ```
+        
+        <Note>
+          Log out and back in after adding your user to the docker group.
+        </Note>
+      </Tab>
+      
+      <Tab title="macOS">
+        Install Docker Desktop:
+        
+        1. Download from [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop)
+        2. Install the .dmg file
+        3. Start Docker Desktop from Applications
+        4. Verify in terminal:
+           ```bash
+           docker --version
+           docker ps
+           ```
+      </Tab>
+      
+      <Tab title="Windows">
+        Install Docker Desktop:
+        
+        1. Download from [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop)
+        2. Enable WSL 2 backend for better performance
+        3. Install and restart
+        4. Verify in PowerShell or Command Prompt:
+           ```powershell
+           docker --version
+           docker ps
+           ```
+      </Tab>
+    </Tabs>
+  </Accordion>
+  
+  <Accordion title="Docker Compose">
+    **Version**: Docker Compose 2.0 or later (Compose V2)
+    
+    ```bash
+    # Verify (built into Docker Desktop)
+    docker compose version
+    
+    # Linux manual installation
+    sudo apt-get install docker-compose-plugin  # Debian/Ubuntu
+    sudo dnf install docker-compose-plugin      # Fedora/RHEL
+    
+    # Or using pip
+    pip3 install docker-compose
+    ```
+    
+    <Info>
+      Docker Desktop includes Docker Compose. Linux users may need to install it separately.
+    </Info>
+  </Accordion>
+  
+  <Accordion title="Ansible">
+    **Version**: Ansible 2.9 or later
+    
+    Required for templating docker-compose configuration files.
+    
+    ```bash
+    # Install via pip
+    pip3 install ansible
+    
+    # Or via package manager
+    sudo apt-get install ansible       # Debian/Ubuntu
+    sudo dnf install ansible           # Fedora/RHEL
+    brew install ansible               # macOS
+    
+    # Verify
+    ansible --version
+    ```
+  </Accordion>
+  
+  <Accordion title="OpenSSL">
+    **Version**: OpenSSL 1.1.1 or later
+    
+    Used for generating SSL certificates.
+    
+    ```bash
+    # Usually pre-installed. Verify:
+    openssl version
+    
+    # Install if needed
+    sudo apt-get install openssl       # Debian/Ubuntu
+    sudo dnf install openssl           # Fedora/RHEL
+    brew install openssl               # macOS
+    ```
+  </Accordion>
+  
+  <Accordion title="Git">
+    **Version**: Git 2.0 or later
+    
+    Required for cloning the AWX repository.
+    
+    ```bash
+    # Verify
+    git --version
+    
+    # Install if needed
+    sudo apt-get install git           # Debian/Ubuntu
+    sudo dnf install git               # Fedora/RHEL
+    brew install git                   # macOS
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Frontend Development Tools (Optional)
+
+Required only if building the AWX web interface:
+
+<Tabs>
+  <Tab title="Node.js">
+    **Version**: Node.js 18.x or later (check [ansible-ui requirements](https://github.com/ansible/ansible-ui/blob/main/README.md))
+    
+    ```bash
+    # Using nvm (recommended)
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+    nvm install 18
+    nvm use 18
+    
+    # Using package manager
+    # Ubuntu/Debian
+    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+    
+    # Fedora
+    sudo dnf install nodejs npm
+    
+    # macOS
+    brew install node@18
+    
+    # Verify
+    node --version
+    npm --version
+    ```
+  </Tab>
+  
+  <Tab title="npm">
+    **Version**: npm 8.x or later
+    
+    Usually installed with Node.js. Update if needed:
+    
+    ```bash
+    npm install -g npm@latest
+    npm --version
+    ```
+  </Tab>
+</Tabs>
+
+### System Resources
+
+<Info>
+  Docker Compose environments require more resources than the containers alone because the development environment includes build tools, debuggers, and bind-mounted source code.
+</Info>
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| **CPU**      | 2 cores | 4+ cores    |
+| **RAM**      | 8 GB    | 16 GB       |
+| **Disk**     | 20 GB   | 50 GB       |
+| **Network**  | Stable internet connection for image pulls and package downloads |
+
+**Disk usage breakdown:**
+- Docker images: ~5-10 GB
+- AWX source code: ~500 MB
+- PostgreSQL data: ~1-5 GB (grows with usage)
+- Python dependencies: ~1 GB
+- Node.js dependencies (UI): ~2 GB
+- Logs and temporary files: ~1-2 GB
+
+### Tested Operating Systems
+
+The Docker Compose development environment is regularly tested on:
+
+<Tabs>
+  <Tab title="Linux">
+    - Fedora (maintained versions)
+    - Ubuntu LTS (18.04, 20.04, 22.04)
+    - Red Hat Enterprise Linux 8, 9
+    - CentOS Stream 8, 9
+    - Debian 10, 11
+    
+    x86_64 (amd64) architecture is fully supported. ARM64 support is experimental.
+  </Tab>
+  
+  <Tab title="macOS">
+    - macOS 11 (Big Sur)
+    - macOS 12 (Monterey)
+    - macOS 13 (Ventura)
+    - macOS 14 (Sonoma)
+    
+    Both Intel and Apple Silicon (M1/M2) are supported via Docker Desktop.
+  </Tab>
+  
+  <Tab title="Windows">
+    - Windows 10 (with WSL 2)
+    - Windows 11 (with WSL 2)
+    
+    <Warning>
+      WSL 2 backend is required for Docker Desktop on Windows. Performance may be significantly slower than Linux or macOS.
+    </Warning>
+  </Tab>
+</Tabs>
+
+<Note>
+  Use on other platforms is untested and may require local modifications.
+</Note>
+
+## Python Requirements
+
+AWX is a Python application. While Python is included in container images, understanding the requirements is useful for development:
+
+### Python Version
+
+<Info>
+  **Python 3.11 or 3.12** is required. Python 3.13 support is available in newer releases.
+</Info>
+
+```bash
+# Check Python version (inside container or for development)
+python3 --version
+
+# AWX Makefile searches for Python in this order:
+python3.12, python3.11, python3
+```
+
+### Core Dependencies
+
+AWX depends on numerous Python packages. Key dependencies include:
+
+<Tabs>
+  <Tab title="Web Framework">
+    - **Django 5.2**: Web framework and ORM
+    - **djangorestframework 3.15**: REST API framework
+    - **daphne 4.2**: ASGI server for Django
+    - **channels 4.3**: WebSocket and async support
+    - **channels-redis 4.3**: Redis channel layer backend
+  </Tab>
+  
+  <Tab title="Database">
+    - **psycopg 3.2**: PostgreSQL adapter
+    - **redis 7.0**: Redis client
+    
+    <Warning>
+      PostgreSQL 12+ is required. AWX does not support MySQL or other databases.
+    </Warning>
+  </Tab>
+  
+  <Tab title="Ansible & Automation">
+    - **ansible-runner**: Executes Ansible playbooks
+    - **receptorctl 1.6**: Controls Receptor mesh network
+    - **kubernetes 35.0**: Kubernetes API client
+    - **openshift 0.13**: OpenShift API client
+  </Tab>
+  
+  <Tab title="Cloud & Secrets">
+    - **boto3 1.40**: AWS SDK
+    - **botocore 1.40**: AWS core library
+    - **azure-identity 1.25**: Azure authentication
+    - **azure-keyvault 4.2**: Azure Key Vault integration
+    - **python-dsv-sdk 1.0**: Thycotic DevOps Secrets Vault
+    - **python-tss-sdk 2.0**: Thycotic Secret Server
+  </Tab>
+  
+  <Tab title="Observability">
+    - **opentelemetry-api 1.37**: OpenTelemetry tracing
+    - **opentelemetry-sdk 1.37**: OpenTelemetry SDK
+    - **prometheus-client 0.23**: Metrics export
+    - **grpcio 1.75**: gRPC framework
+  </Tab>
+</Tabs>
+
+For the complete list of dependencies, see:
+- [requirements.txt](https://github.com/ansible/awx/blob/devel/requirements/requirements.txt)
+- [requirements_dev.txt](https://github.com/ansible/awx/blob/devel/requirements/requirements_dev.txt)
+
+### Development Dependencies
+
+Additional packages for development and testing:
+
+```python
+# Testing frameworks
+pytest>=6.2
+pytest-django
+pytest-cov
+pytest-mock
+pytest-timeout
+pytest-xdist  # Parallel test execution
+
+# Code quality
+black          # Code formatter
+flake8         # Linter
+yamllint       # YAML linter
+
+# Debugging
+ipython>=7.31
+debugpy
+remote-pdb
+
+# Documentation
+django-debug-toolbar>=6.0
+drf-spectacular>=0.27.0
+```
+
+## Network Requirements
+
+Both installation methods require network access:
+
+### Outbound Access
+
+<AccordionGroup>
+  <Accordion title="Container Registries">
+    - `quay.io` - AWX images
+    - `ghcr.io` - GitHub Container Registry
+    - `docker.io` - Docker Hub (PostgreSQL, Redis)
+    - `registry.k8s.io` - Kubernetes components
+  </Accordion>
+  
+  <Accordion title="Package Repositories">
+    - `pypi.org` - Python packages (pip)
+    - `npmjs.org` - Node.js packages (npm)
+    - `github.com` - Git repositories
+    - OS package repositories (apt, yum, dnf)
+  </Accordion>
+  
+  <Accordion title="Runtime Dependencies">
+    - **Ansible Galaxy**: Download roles and collections
+    - **SCM servers**: Git, Subversion, Mercurial repositories
+    - **Inventory sources**: Cloud providers, external inventory systems
+    - **Credential providers**: CyberArk, HashiCorp Vault, Azure Key Vault
+    - **Notification services**: Slack, PagerDuty, email servers
+  </Accordion>
+</AccordionGroup>
+
+### Firewall Rules
+
+For AWX Operator deployments:
+
+| Port  | Protocol | Direction | Purpose                          |
+|-------|----------|-----------|----------------------------------|
+| 80    | TCP      | Inbound   | HTTP (redirect to HTTPS)        |
+| 443   | TCP      | Inbound   | HTTPS (web interface and API)   |
+| 27199 | TCP      | Bi-directional | Receptor mesh (clustered AWX) |
+| 5432  | TCP      | Internal  | PostgreSQL (within cluster)     |
+| 6379  | TCP      | Internal  | Redis (within cluster)          |
+
+<Info>
+  Kubernetes/OpenShift handles internal networking automatically. Only ingress ports (80/443) need external firewall rules.
+</Info>
+
+## Database Requirements
+
+### PostgreSQL
+
+AWX requires PostgreSQL as its database backend:
+
+- **Version**: PostgreSQL 12, 13, 14, or 15 recommended
+- **Minimum**: PostgreSQL 12
+- **Extensions**: No special extensions required
+- **Character encoding**: UTF8
+- **Collation**: en_US.UTF-8 or C
+
+<Tabs>
+  <Tab title="AWX Operator">
+    PostgreSQL is automatically deployed by the operator unless you configure an external database.
+    
+    **Managed PostgreSQL:**
+    - Deployed as a StatefulSet
+    - Uses persistent volumes for data
+    - Default image: `postgres:13` (configurable)
+    - Automatically configured with correct settings
+  </Tab>
+  
+  <Tab title="Docker Compose">
+    PostgreSQL runs as a Docker container:
+    
+    ```bash
+    # Container name
+    tools_postgres_1
+    
+    # Access PostgreSQL
+    docker exec -it tools_postgres_1 psql -U awx -d awx
+    ```
+    
+    Data is stored in a Docker volume and persists between container restarts.
+  </Tab>
+  
+  <Tab title="External Database">
+    You can use an external PostgreSQL instance:
+    
+    **Requirements:**
+    - PostgreSQL 12+
+    - Accessible from AWX pods/containers
+    - Database and user pre-created
+    - Sufficient connection limits (50+ concurrent connections)
+    
+    **Recommended settings:**
+    ```sql
+    -- Create database and user
+    CREATE DATABASE awx;
+    CREATE USER awx WITH PASSWORD 'secure_password';
+    GRANT ALL PRIVILEGES ON DATABASE awx TO awx;
+    
+    -- Recommended PostgreSQL settings
+    ALTER SYSTEM SET max_connections = '200';
+    ALTER SYSTEM SET shared_buffers = '256MB';
+    ALTER SYSTEM SET effective_cache_size = '1GB';
+    ALTER SYSTEM SET work_mem = '16MB';
+    ```
+  </Tab>
+</Tabs>
+
+### Redis
+
+AWX uses Redis for caching and message brokering:
+
+- **Version**: Redis 6.0 or later
+- **Persistence**: Not required (ephemeral data)
+- **Memory**: 1GB minimum, 2GB recommended
+
+<Info>
+  Redis is automatically deployed and configured by both installation methods. External Redis is not commonly used.
+</Info>
+
+## AWX CLI Requirements
+
+The AWX command-line interface has minimal requirements:
+
+```bash
+# Install awxkit
+pip3 install awxkit
+
+# Requirements
+- Python 3.8+
+- pip 21.0+
+
+# Verify installation
+awx --version
+awx --help
+```
+
+The CLI can be installed on any machine with network access to your AWX instance.
+
+## Checking Requirements
+
+Use these commands to verify your system meets the requirements:
+
+<CodeGroup>
+
+```bash Docker Compose
+# Check Docker
+docker --version
+docker info
+
+# Check Docker Compose
+docker compose version
+
+# Check Ansible
+ansible --version
+
+# Check Python
+python3 --version
+
+# Check OpenSSL
+openssl version
+
+# Check Git
+git --version
+
+# Check Node.js and npm (for UI development)
+node --version
+npm --version
+
+# Check available disk space
+df -h
+
+# Check available memory
+free -h
+```
+
+```bash AWX Operator
+# Check kubectl
+kubectl version --client
+kubectl cluster-info
+
+# Check cluster resources
+kubectl top nodes
+kubectl get sc  # Storage classes
+
+# Check cluster version
+kubectl version
+
+# Check available resources in namespace
+kubectl describe nodes
+
+# For OpenShift
+oc version
+oc get clusterversion
+```
+
+</CodeGroup>
+
+## Next Steps
+
+Once you've verified your system meets the requirements:
+
+<CardGroup cols={2}>
+  <Card title="Install with AWX Operator" icon="kubernetes" href="/installation/awx-operator">
+    Deploy AWX on Kubernetes or OpenShift for production use
+  </Card>
+  
+  <Card title="Install with Docker Compose" icon="docker" href="/installation/docker-compose">
+    Set up a local development environment with Docker Compose
+  </Card>
+</CardGroup>

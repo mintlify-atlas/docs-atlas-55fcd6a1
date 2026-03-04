@@ -1,0 +1,466 @@
+---
+title: Execution Environments
+description: Understanding AWX Execution Environments and containerized job execution
+---
+
+## What is an Execution Environment?
+
+An **Execution Environment** (EE) is a container image that provides a consistent, portable, and isolated runtime for Ansible automation. Execution Environments package Ansible Core, collections, Python dependencies, and system packages into a single container image, ensuring jobs run with the exact dependencies they need.
+
+<Info>
+Execution Environments replaced the legacy virtual environment (venv) approach, providing better isolation, reproducibility, and dependency management.
+</Info>
+
+## Core Concepts
+
+### Container-Based Execution
+
+All AWX jobs run in containers using execution environments. This provides:
+
+- **Isolation**: Each job runs in its own container with dedicated resources
+- **Consistency**: Same environment across development, testing, and production
+- **Portability**: Container images can be shared and versioned
+- **Security**: Containerization provides process and filesystem isolation
+
+From `docs/execution_environments.md:1-4`:
+> All jobs use container isolation for environment consistency and security. Compliant images are referred to as Execution Environments (EE)s.
+
+### Execution Environment Model
+
+From the ExecutionEnvironment model (`awx/main/models/execution_environments.py:13-77`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | String | EE name (unique) |
+| `description` | String | Optional description |
+| `organization` | ForeignKey | Organization for scoping (null = global) |
+| `image` | String | Full container image location (registry/repo:tag) |
+| `managed` | Boolean | System-managed EE (not user-editable) |
+| `credential` | ForeignKey | Container registry credential |
+| `pull` | Choice | Pull policy: `always`, `missing`, or `never` |
+
+### Image Location
+
+The `image` field specifies the full container image reference:
+
+```python
+# From execution_environments.py:34-38
+image = models.CharField(
+    max_length=1024,
+    verbose_name=_('image location'),
+    help_text=_"The full image location, including the container registry, image name, and version tag."),
+    validators=[validate_container_image_name],
+)
+```
+
+Examples:
+- `quay.io/ansible/awx-ee:latest`
+- `registry.example.com/my-custom-ee:v1.0.0`
+- `docker.io/library/ubuntu:22.04`
+
+### Pull Policies
+
+From `execution_environments.py:19-23`:
+
+```python
+PULL_CHOICES = [
+    ('always', _("Always pull container before running.")),
+    ('missing', _("Only pull the image if not present before running.")),
+    ('never', _("Never pull container before running.")),
+]
+```
+
+- **always**: Pull image before every job (ensures latest version)
+- **missing**: Pull only if image not present locally (default behavior)
+- **never**: Never pull, use local image only (requires pre-pulled images)
+
+## Global vs Organization EEs
+
+Execution environments can be global or organization-scoped:
+
+### Global Execution Environments
+
+From `docs/execution_environments.md:17-20`:
+
+> EEs without an organization (value is null in the API) are global EEs. Only superusers can create global EEs. These can become the global job default in certain circumstances.
+
+Global EEs are available to all organizations and can be set as defaults.
+
+### Organization Execution Environments
+
+Organization-scoped EEs:
+- Only visible within the organization
+- Manageable by organization admins with `execution_environment_admin_role`
+- Used for organization-specific dependencies
+
+```python
+# From execution_environments.py:25-33
+organization = models.ForeignKey(
+    'Organization',
+    null=True,
+    default=None,
+    blank=True,
+    on_delete=models.CASCADE,
+    related_name='%(class)ss',
+    help_text=_('The organization used to determine access to this execution environment.'),
+)
+```
+
+## Pre-Created Execution Environments
+
+AWX installers should run this management command:
+
+```bash
+awx-manage register_default_execution_environments
+```
+
+From `docs/execution_environments.md:24-31`, this creates:
+
+1. **Control Plane EE**: Used for system operations
+   - Corresponds to `CONTROL_PLANE_EXECUTION_ENVIRONMENT` setting
+   - Used for project updates, inventory updates, system jobs
+
+2. **Global Job EEs**: Default execution environments for jobs
+   - All images from `GLOBAL_JOB_EXECUTION_ENVIRONMENTS` setting
+   - Available as fallback for jobs
+
+<Warning>
+These execution environments are critical for AWX operation. The system will not function properly without them.
+</Warning>
+
+## Execution Environment Selection
+
+### For Jobs, Ad Hoc Commands, and Inventory Updates
+
+From `docs/execution_environments.md:38-49`, AWX selects EEs in this order:
+
+1. Template's `execution_environment` (job template or inventory source)
+2. Project's `default_environment`
+3. Organization's `default_environment` (of the job)
+4. Organization's `default_environment` (of the inventory)
+5. `DEFAULT_EXECUTION_ENVIRONMENT` setting
+6. Any image from `GLOBAL_JOB_EXECUTION_ENVIRONMENTS`
+7. Any other global EE (most recently created)
+
+### For Project Updates
+
+From `docs/execution_environments.md:34-35`:
+
+> Project updates will always use the control plane EE.
+
+Projects cannot customize their update environment:
+
+```python
+# From projects.py:187-193
+def resolve_execution_environment(self):
+    """
+    Project updates, themselves, will use the control plane execution environment.
+    Jobs using the project can use the default_environment, but the project updates
+    are not flexible enough to allow customizing the image they use.
+    """
+    return get_control_plane_execution_environment()
+```
+
+## Building Execution Environments
+
+Execution Environments are built using **ansible-builder**:
+
+### Definition File
+
+Create an `execution-environment.yml`:
+
+```yaml
+---
+version: 3
+
+build_arg_defaults:
+  ANSIBLE_GALAXY_CLI_COLLECTION_OPTS: '-v'
+
+dependencies:
+  galaxy: requirements.yml
+  python: requirements.txt
+  system: bindep.txt
+
+images:
+  base_image:
+    name: quay.io/ansible/ansible-runner:latest
+
+additional_build_steps:
+  prepend_base:
+    - RUN whoami
+  append_final:
+    - RUN echo "Build complete"
+```
+
+### Requirements Files
+
+**requirements.yml** (Ansible collections):
+```yaml
+---
+collections:
+  - name: amazon.aws
+    version: ">=6.0.0"
+  - name: community.general
+  - name: ansible.posix
+```
+
+**requirements.txt** (Python packages):
+```txt
+boto3>=1.26.0
+requests>=2.28.0
+pyyaml>=6.0
+```
+
+**bindep.txt** (System packages):
+```txt
+git [platform:rpm]
+rsync [platform:rpm]
+python3-devel [platform:rpm]
+```
+
+### Building the Image
+
+```bash
+ansible-builder build --tag my-custom-ee:1.0.0 --container-runtime podman
+```
+
+For more details, see:
+- [Ansible Builder documentation](https://docs.ansible.com/projects/builder/en/latest/)
+- [Getting started with Execution Environments](https://docs.ansible.com/en/latest/getting_started_ee/index.html)
+
+## Container Registry Authentication
+
+Private registries require credentials:
+
+```python
+# From execution_environments.py:41-48
+credential = models.ForeignKey(
+    'Credential',
+    related_name='%(class)ss',
+    blank=True,
+    null=True,
+    default=None,
+    on_delete=models.SET_NULL,
+)
+```
+
+Create a Container Registry credential:
+
+```http
+POST /api/v2/credentials/
+Content-Type: application/json
+
+{
+  "name": "Private Registry",
+  "credential_type": 8,
+  "inputs": {
+    "host": "registry.example.com",
+    "username": "robot-account",
+    "password": "secret-token",
+    "verify_ssl": true
+  }
+}
+```
+
+Attach the credential to the execution environment.
+
+## API Endpoints
+
+### List Execution Environments
+```http
+GET /api/v2/execution_environments/
+```
+
+### Create Execution Environment
+```http
+POST /api/v2/execution_environments/
+Content-Type: application/json
+
+{
+  "name": "My Custom EE",
+  "description": "Custom EE with cloud collections",
+  "image": "quay.io/myorg/custom-ee:v1.0.0",
+  "pull": "missing",
+  "organization": 1,
+  "credential": 10
+}
+```
+
+### Create Global Execution Environment
+```http
+POST /api/v2/execution_environments/
+Content-Type: application/json
+
+{
+  "name": "Global Default EE",
+  "description": "Default EE for all jobs",
+  "image": "quay.io/ansible/awx-ee:latest",
+  "pull": "always"
+}
+```
+
+### Update Execution Environment
+```http
+PATCH /api/v2/execution_environments/{id}/
+Content-Type: application/json
+
+{
+  "image": "quay.io/myorg/custom-ee:v1.1.0"
+}
+```
+
+## Setting Default Execution Environments
+
+### On Job Templates
+
+```http
+PATCH /api/v2/job_templates/{id}/
+Content-Type: application/json
+
+{
+  "execution_environment": 5
+}
+```
+
+### On Projects
+
+```http
+PATCH /api/v2/projects/{id}/
+Content-Type: application/json
+
+{
+  "default_environment": 5
+}
+```
+
+### On Organizations
+
+```http
+PATCH /api/v2/organizations/{id}/
+Content-Type: application/json
+
+{
+  "default_environment": 5
+}
+```
+
+### Global Default
+
+```http
+PATCH /api/v2/settings/jobs/
+Content-Type: application/json
+
+{
+  "DEFAULT_EXECUTION_ENVIRONMENT": 5
+}
+```
+
+## Migrating from Custom Virtual Environments
+
+For AWX installations that used custom venvs:
+
+From `docs/execution_environments.md:51-61`:
+
+```bash
+# List existing custom venvs
+awx-manage list_custom_venvs
+
+# Show which resources use which venvs
+awx-manage custom_venv_associations
+
+# Export venv dependencies to create EE definition
+awx-manage export_custom_venv -q /path/to/venv > requirements.txt
+```
+
+Use the exported requirements to build equivalent execution environments.
+
+## Permissions
+
+Execution environment permissions are enforced:
+
+```python
+# From execution_environments.py:60-76
+def validate_role_assignment(self, actor, role_definition, **kwargs):
+    if self.managed:
+        raise ValidationError({'object_id': _('Can not assign object roles to managed Execution Environments')})
+    if self.organization_id is None:
+        raise ValidationError({'object_id': _('Can not assign object roles to global Execution Environments')})
+    
+    if actor._meta.model_name == 'user':
+        if actor.has_obj_perm(self.organization, 'view'):
+            return
+        
+        requesting_user = kwargs.get('requesting_user', None)
+        if check_resource_server_for_user_in_organization(actor, self.organization, requesting_user):
+            return
+        
+        raise ValidationError({'user': _('User must have view permission to Execution Environment organization')})
+```
+
+Key rules:
+- Managed EEs: No role assignments allowed
+- Global EEs: No role assignments allowed (superuser access only)
+- Organization EEs: User must have view permission on organization
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Specific Tags">
+    Always use specific version tags (e.g., `v1.0.0`) instead of `latest` for production to ensure consistency.
+  </Accordion>
+  
+  <Accordion title="Set Appropriate Pull Policy">
+    Use `missing` for production (faster, more predictable) and `always` for development (ensures latest code).
+  </Accordion>
+  
+  <Accordion title="Version Your EEs">
+    Treat execution environments like application code: version them, test them, and promote through environments.
+  </Accordion>
+  
+  <Accordion title="Minimize Image Size">
+    Only include necessary collections and packages. Smaller images pull faster and use less storage.
+  </Accordion>
+  
+  <Accordion title="Use Private Registries">
+    Host custom EEs in private registries with proper authentication for security and control.
+  </Accordion>
+  
+  <Accordion title="Test Before Deploying">
+    Test execution environments thoroughly before using in production. Run sample playbooks to verify dependencies.
+  </Accordion>
+  
+  <Accordion title="Document Dependencies">
+    Maintain clear documentation of what collections and packages each EE contains and why.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+### Image Pull Failures
+
+- Verify image name and tag are correct
+- Check container registry credential
+- Ensure AWX has network access to registry
+- Check pull policy setting
+
+### Missing Dependencies
+
+- Verify collections are installed in EE
+- Check Python package versions
+- Ensure system packages are present
+- Review ansible-builder logs
+
+### Performance Issues
+
+- Use `missing` pull policy to avoid unnecessary pulls
+- Pre-pull images on AWX nodes
+- Use local registry for faster pulls
+- Consider image size and optimization
+
+## Related Resources
+
+- [Job Templates](/concepts/job-templates) - Use EEs in job templates
+- [Projects](/concepts/projects) - Set default EE for project jobs
+- [Organizations](/guides/organizations-and-teams) - Set organization-wide default EE
+- [Ansible Builder](https://docs.ansible.com/projects/builder/) - Build custom EEs
+- [Execution Environment Guide](https://docs.ansible.com/en/latest/getting_started_ee/) - Comprehensive EE guide

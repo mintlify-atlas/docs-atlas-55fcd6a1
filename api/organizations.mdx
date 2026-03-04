@@ -1,0 +1,389 @@
+---
+title: 'Organizations'
+description: 'Manage AWX organizations via the API'
+---
+
+## Overview
+
+Organizations are the top-level organizational units in AWX. They contain teams, users, projects, inventories, and job templates.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/organizations/` | List organizations |
+| POST | `/api/v2/organizations/` | Create organization |
+| GET | `/api/v2/organizations/{id}/` | Retrieve organization |
+| PATCH | `/api/v2/organizations/{id}/` | Update organization |
+| DELETE | `/api/v2/organizations/{id}/` | Delete organization |
+
+## List Organizations
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ResponseField name="count" type="integer">
+  Total number of organizations
+</ResponseField>
+
+<ResponseField name="results" type="array">
+  Array of organization objects
+</ResponseField>
+
+## Create Organization
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/organizations/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Engineering",
+    "description": "Engineering team organization",
+    "max_hosts": 100,
+    "default_environment": 1
+  }'
+```
+
+<ParamField body="name" type="string" required>
+  Name of the organization (unique)
+</ParamField>
+
+<ParamField body="description" type="string">
+  Description of the organization
+</ParamField>
+
+<ParamField body="max_hosts" type="integer">
+  Maximum number of hosts allowed (superuser only)
+</ParamField>
+
+<ParamField body="default_environment" type="integer">
+  ID of the default execution environment
+</ParamField>
+
+## Retrieve Organization
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Response Schema
+
+<ResponseField name="id" type="integer">
+  Organization ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Organization name
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Organization description
+</ResponseField>
+
+<ResponseField name="max_hosts" type="integer">
+  Maximum hosts allowed for this organization
+</ResponseField>
+
+<ResponseField name="created" type="string">
+  Creation timestamp (ISO 8601)
+</ResponseField>
+
+<ResponseField name="modified" type="string">
+  Last modification timestamp
+</ResponseField>
+
+<ResponseField name="related" type="object">
+  Links to related resources:
+  - `projects` - Organization's projects
+  - `inventories` - Organization's inventories
+  - `job_templates` - Organization's job templates
+  - `workflow_job_templates` - Organization's workflow templates
+  - `users` - Organization members
+  - `admins` - Organization administrators
+  - `teams` - Organization teams
+  - `credentials` - Organization credentials
+  - `execution_environments` - Available execution environments
+  - `activity_stream` - Activity log
+  - `notification_templates` - Notification templates
+  - `instance_groups` - Instance groups
+  - `galaxy_credentials` - Galaxy credentials for Ansible content
+  - `object_roles` - Available roles
+  - `access_list` - User access list
+</ResponseField>
+
+<ResponseField name="summary_fields" type="object">
+  Summary information about related objects and counts
+</ResponseField>
+
+## Update Organization
+
+```bash
+curl -X PATCH \
+  https://awx.example.com/api/v2/organizations/1/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Updated description",
+    "default_environment": 2
+  }'
+```
+
+<Info>
+  Only superusers can modify the `max_hosts` field.
+</Info>
+
+## Delete Organization
+
+```bash
+curl -X DELETE \
+  https://awx.example.com/api/v2/organizations/1/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<Warning>
+  Deleting an organization will also delete all associated resources (projects, inventories, job templates, etc.)
+</Warning>
+
+## Organization Users
+
+### List Organization Users
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/users/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### List Organization Admins
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/admins/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Organization Resources
+
+### List Organization Projects
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/projects/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### List Organization Inventories
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/inventories/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### List Organization Job Templates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/job_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### List Organization Workflow Job Templates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/workflow_job_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### List Organization Teams
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/teams/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### List Organization Credentials
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/credentials/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Notification Templates
+
+### List Notification Templates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/notification_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### List Started Notification Templates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/notification_templates_started/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### List Success Notification Templates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/notification_templates_success/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### List Error Notification Templates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/notification_templates_error/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### List Approval Notification Templates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/notification_templates_approvals/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Instance Groups
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/instance_groups/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Galaxy Credentials
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/galaxy_credentials/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Activity Stream
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/activity_stream/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Roles and Access
+
+### List Object Roles
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/object_roles/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Returns available roles:
+- **admin_role** - Full administrative access
+- **member_role** - Organization membership
+- **auditor_role** - Read-only access
+- **execute_role** - Execute job templates
+- **project_admin_role** - Manage projects
+- **inventory_admin_role** - Manage inventories
+- **credential_admin_role** - Manage credentials
+- **workflow_admin_role** - Manage workflows
+- **notification_admin_role** - Manage notifications
+- **job_template_admin_role** - Manage job templates
+
+<Info>
+  Admin and member roles are user-only and cannot be assigned to teams.
+</Info>
+
+### List Access
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/access_list/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Shows which users and teams have access and their roles.
+
+## Filtering
+
+```bash
+# By name
+?name=Engineering
+
+# By name (partial match)
+?name__icontains=eng
+
+# By created date
+?created__gte=2024-01-01
+
+# Search
+?search=engineering
+```
+
+## Ordering
+
+```bash
+# By name
+?order_by=name
+
+# By creation date (newest first)
+?order_by=-created
+```
+
+## Complete Example
+
+```python
+import requests
+import json
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Create organization
+org_data = {
+    "name": "DevOps Team",
+    "description": "DevOps organization"
+}
+
+response = requests.post(
+    f"{base_url}/organizations/",
+    headers=headers,
+    data=json.dumps(org_data)
+)
+
+if response.status_code == 201:
+    org = response.json()
+    org_id = org['id']
+    print(f"Created organization {org_id}")
+    
+    # List organization projects
+    projects = requests.get(
+        f"{base_url}/organizations/{org_id}/projects/",
+        headers=headers
+    ).json()
+    
+    print(f"Organization has {projects['count']} projects")
+else:
+    print(f"Error: {response.status_code}")
+    print(response.json())
+```

@@ -1,0 +1,197 @@
+---
+title: 'API Overview'
+description: 'Introduction to the AWX REST API'
+---
+
+## Introduction
+
+The AWX REST API provides programmatic access to AWX's automation functionality. The API is built using Django REST Framework and follows RESTful conventions.
+
+## Base URL
+
+All API endpoints are accessed via:
+
+```
+https://your-awx-host/api/v2/
+```
+
+## API Versioning
+
+AWX uses URL path versioning. The current version is `v2` and is included in all endpoint paths:
+
+```
+/api/v2/organizations/
+/api/v2/job_templates/
+/api/v2/jobs/
+```
+
+## HTTP Methods
+
+The API uses standard HTTP methods:
+
+- **GET** - Retrieve resources
+- **POST** - Create new resources
+- **PATCH** - Partially update resources
+- **PUT** - Fully update resources
+- **DELETE** - Delete resources
+- **OPTIONS** - Get metadata about endpoints
+
+## Response Format
+
+All responses are returned in JSON format with proper HTTP status codes:
+
+### Success Codes
+
+- **200 OK** - Successful GET, PATCH, PUT
+- **201 Created** - Successful POST
+- **202 Accepted** - Request accepted for processing
+- **204 No Content** - Successful DELETE
+
+### Error Codes
+
+- **400 Bad Request** - Invalid request data
+- **401 Unauthorized** - Authentication required
+- **403 Forbidden** - Insufficient permissions
+- **404 Not Found** - Resource not found
+- **405 Method Not Allowed** - HTTP method not supported
+- **409 Conflict** - Resource conflict
+- **500 Internal Server Error** - Server error
+
+## Resource Structure
+
+Most API responses follow this structure:
+
+```json
+{
+  "id": 1,
+  "type": "organization",
+  "url": "/api/v2/organizations/1/",
+  "related": {
+    "projects": "/api/v2/organizations/1/projects/",
+    "inventories": "/api/v2/organizations/1/inventories/",
+    "job_templates": "/api/v2/organizations/1/job_templates/"
+  },
+  "summary_fields": {
+    "created_by": {
+      "id": 1,
+      "username": "admin"
+    }
+  },
+  "created": "2024-01-15T10:30:00.000Z",
+  "modified": "2024-01-15T10:30:00.000Z",
+  "name": "Default",
+  "description": "Default organization"
+}
+```
+
+### Common Fields
+
+- **id** - Unique identifier
+- **type** - Resource type
+- **url** - Direct URL to the resource
+- **related** - Links to related resources
+- **summary_fields** - Summarized information about related objects
+- **created** - Creation timestamp (ISO 8601)
+- **modified** - Last modification timestamp (ISO 8601)
+
+## Browsable API
+
+AWX provides a browsable API interface when accessed via a web browser. This allows you to:
+
+- Explore available endpoints
+- View API documentation
+- Test API calls directly
+- See allowed methods and fields
+
+Access it at: `https://your-awx-host/api/v2/`
+
+## OPTIONS Method
+
+Every endpoint supports the OPTIONS method to retrieve metadata:
+
+```bash
+curl -X OPTIONS \
+  https://awx.example.com/api/v2/organizations/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Response includes:
+
+- **name** - Human-readable endpoint name
+- **description** - Endpoint description
+- **actions** - Available HTTP methods
+- **parses** - Supported request content types
+- **renders** - Supported response content types
+
+## Rate Limiting
+
+AWX may implement rate limiting to prevent abuse. Rate limit information is included in response headers:
+
+```
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 999
+X-RateLimit-Reset: 1640995200
+```
+
+## Content Negotiation
+
+The API supports multiple content types:
+
+### Request Content-Type
+
+- `application/json` (default)
+- `application/x-www-form-urlencoded`
+- `multipart/form-data`
+
+### Response Accept
+
+- `application/json` (default)
+- `text/html` (browsable API)
+
+## Error Responses
+
+Errors return detailed information:
+
+```json
+{
+  "detail": "Authentication credentials were not provided."
+}
+```
+
+Or for validation errors:
+
+```json
+{
+  "name": [
+    "This field is required."
+  ],
+  "inventory": [
+    "Invalid pk '999' - object does not exist."
+  ]
+}
+```
+
+## Getting Started
+
+1. **Authenticate** - Obtain an API token
+2. **Explore** - Use OPTIONS to discover endpoints
+3. **List Resources** - GET collection endpoints
+4. **Create Resources** - POST with required fields
+5. **Manage Resources** - PATCH/PUT/DELETE as needed
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Learn how to authenticate API requests
+  </Card>
+  <Card title="Pagination" icon="list" href="/api/pagination">
+    Handle paginated responses
+  </Card>
+  <Card title="Filtering" icon="filter" href="/api/filtering">
+    Filter and search resources
+  </Card>
+  <Card title="Organizations" icon="building" href="/api/organizations">
+    Manage organizations
+  </Card>
+</CardGroup>

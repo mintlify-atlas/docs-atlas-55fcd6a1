@@ -1,0 +1,306 @@
+---
+title: 'Activity Stream'
+description: 'Track changes and audit activity in AWX'
+---
+
+## Overview
+
+The activity stream provides a comprehensive audit log of all actions performed in AWX. It records creates, updates, deletes, and associations for all resources.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/activity_stream/` | List all activity |
+| GET | `/api/v2/activity_stream/{id}/` | Retrieve activity entry |
+| GET | `/api/v2/{resource}/{id}/activity_stream/` | Activity for specific resource |
+
+## List Activity Stream
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/activity_stream/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Retrieve Activity Entry
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/activity_stream/1234/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Response Schema
+
+<ResponseField name="id" type="integer">
+  Activity entry ID
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  When the activity occurred
+</ResponseField>
+
+<ResponseField name="operation" type="string">
+  Operation performed: `create`, `update`, `delete`, `associate`, `disassociate`
+</ResponseField>
+
+<ResponseField name="changes" type="object">
+  Changes made (field-level diff)
+</ResponseField>
+
+<ResponseField name="object1" type="string">
+  Primary object type
+</ResponseField>
+
+<ResponseField name="object2" type="string">
+  Secondary object type (for associations)
+</ResponseField>
+
+<ResponseField name="object_relationship_type" type="string">
+  Relationship type for associations
+</ResponseField>
+
+<ResponseField name="actor" type="object">
+  User who performed the action:
+  - `id` - User ID
+  - `username` - Username
+</ResponseField>
+
+## Resource Activity Stream
+
+Get activity for a specific resource:
+
+```bash
+# Job template activity
+curl -X GET \
+  https://awx.example.com/api/v2/job_templates/10/activity_stream/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Organization activity
+curl -X GET \
+  https://awx.example.com/api/v2/organizations/1/activity_stream/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# User activity
+curl -X GET \
+  https://awx.example.com/api/v2/users/5/activity_stream/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Activity Operations
+
+### Create
+
+Recorded when a resource is created:
+
+```json
+{
+  "operation": "create",
+  "object1": "job_template",
+  "changes": {
+    "name": [null, "Deploy Application"],
+    "inventory": [null, 3],
+    "project": [null, 5]
+  }
+}
+```
+
+### Update
+
+Recorded when a resource is modified:
+
+```json
+{
+  "operation": "update",
+  "object1": "job_template",
+  "changes": {
+    "description": ["Old description", "New description"],
+    "extra_vars": ["env: dev", "env: production"]
+  }
+}
+```
+
+### Delete
+
+Recorded when a resource is deleted:
+
+```json
+{
+  "operation": "delete",
+  "object1": "inventory",
+  "changes": {
+    "id": 10,
+    "name": "Deleted Inventory"
+  }
+}
+```
+
+### Associate
+
+Recorded when resources are associated:
+
+```json
+{
+  "operation": "associate",
+  "object1": "team",
+  "object2": "user",
+  "object_relationship_type": "member"
+}
+```
+
+### Disassociate
+
+Recorded when associations are removed:
+
+```json
+{
+  "operation": "disassociate",
+  "object1": "role",
+  "object2": "user"
+}
+```
+
+## Filtering
+
+```bash
+# By operation
+?operation=create
+?operation__in=update,delete
+
+# By actor (user)
+?actor=5
+?actor__username=admin
+
+# By object type
+?object1=job_template
+
+# By timestamp
+?timestamp__gte=2024-01-01T00:00:00Z
+?timestamp__lte=2024-12-31T23:59:59Z
+
+# Recent activity (last 24 hours)
+?timestamp__gte=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+
+# By specific resource
+?object1_id=10&object1=inventory
+```
+
+## Ordering
+
+```bash
+# Most recent first (default)
+?order_by=-timestamp
+
+# Oldest first
+?order_by=timestamp
+
+# By operation
+?order_by=operation
+```
+
+## Common Use Cases
+
+### Audit User Actions
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/activity_stream/?actor__username=admin&order_by=-timestamp" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Track Resource Changes
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/activity_stream/?object1=job_template&object1_id=10" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Monitor Deletions
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/activity_stream/?operation=delete" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Recent Activity Dashboard
+
+```bash
+curl -X GET \
+  "https://awx.example.com/api/v2/activity_stream/?page_size=50&order_by=-timestamp" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Sensitive Data
+
+<Warning>
+  The activity stream does not log sensitive credential data. Password and key fields are redacted.
+</Warning>
+
+## Complete Example
+
+```python
+import requests
+from datetime import datetime, timedelta
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {"Authorization": f"Bearer {token}"}
+
+# Get last 24 hours of activity
+start_time = (datetime.utcnow() - timedelta(days=1)).isoformat() + "Z"
+
+response = requests.get(
+    f"{base_url}/activity_stream/",
+    params={
+        "timestamp__gte": start_time,
+        "order_by": "-timestamp",
+        "page_size": 100
+    },
+    headers=headers
+)
+
+activities = response.json()['results']
+
+# Summarize activity
+operations = {}
+users = {}
+
+for activity in activities:
+    op = activity['operation']
+    operations[op] = operations.get(op, 0) + 1
+    
+    actor = activity['summary_fields']['actor']['username']
+    users[actor] = users.get(actor, 0) + 1
+
+print("Activity Summary (Last 24 hours)")
+print("\nOperations:")
+for op, count in sorted(operations.items()):
+    print(f"  {op}: {count}")
+
+print("\nMost Active Users:")
+for user, count in sorted(users.items(), key=lambda x: x[1], reverse=True)[:5]:
+    print(f"  {user}: {count} actions")
+
+# Track changes to a specific resource
+print("\nRecent changes to Job Template 10:")
+response = requests.get(
+    f"{base_url}/job_templates/10/activity_stream/",
+    params={"order_by": "-timestamp", "page_size": 10},
+    headers=headers
+)
+
+for activity in response.json()['results']:
+    timestamp = activity['timestamp']
+    operation = activity['operation']
+    actor = activity['summary_fields']['actor']['username']
+    changes = activity.get('changes', {})
+    
+    print(f"\n{timestamp} - {operation} by {actor}")
+    if changes:
+        for field, values in changes.items():
+            if isinstance(values, list) and len(values) == 2:
+                print(f"  {field}: {values[0]} -> {values[1]}")
+```

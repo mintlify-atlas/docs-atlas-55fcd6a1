@@ -1,0 +1,457 @@
+---
+title: 'Notifications'
+description: 'Configure and manage AWX notifications via the API'
+---
+
+## Overview
+
+Notifications enable AWX to send alerts about job status, workflow completion, and other events to external services. Notifications are configured via notification templates and can be associated with jobs, projects, and workflows.
+
+## Notification Templates
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v2/notification_templates/` | List notification templates |
+| POST | `/api/v2/notification_templates/` | Create notification template |
+| GET | `/api/v2/notification_templates/{id}/` | Retrieve template |
+| PATCH | `/api/v2/notification_templates/{id}/` | Update template |
+| DELETE | `/api/v2/notification_templates/{id}/` | Delete template |
+| POST | `/api/v2/notification_templates/{id}/test/` | Test notification |
+
+### List Notification Templates
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/notification_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Create Notification Template
+
+#### Slack Notification
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/notification_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Slack Alerts",
+    "description": "Send alerts to Slack",
+    "organization": 1,
+    "notification_type": "slack",
+    "notification_configuration": {
+      "token": "xoxb-your-slack-token",
+      "channels": ["#ansible-alerts"]
+    }
+  }'
+```
+
+#### Email Notification
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/notification_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Email Alerts",
+    "description": "Send email notifications",
+    "organization": 1,
+    "notification_type": "email",
+    "notification_configuration": {
+      "host": "smtp.example.com",
+      "port": 587,
+      "username": "notifications@example.com",
+      "password": "smtp_password",
+      "use_tls": true,
+      "use_ssl": false,
+      "sender": "AWX <notifications@example.com>",
+      "recipients": ["team@example.com"]
+    }
+  }'
+```
+
+#### Webhook Notification
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/notification_templates/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Webhook Alert",
+    "organization": 1,
+    "notification_type": "webhook",
+    "notification_configuration": {
+      "url": "https://example.com/webhook",
+      "http_method": "POST",
+      "headers": {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer webhook-token"
+      }
+    }
+  }'
+```
+
+<ParamField body="name" type="string" required>
+  Notification template name
+</ParamField>
+
+<ParamField body="description" type="string">
+  Template description
+</ParamField>
+
+<ParamField body="organization" type="integer" required>
+  Organization ID
+</ParamField>
+
+<ParamField body="notification_type" type="string" required>
+  Notification type: `email`, `slack`, `twilio`, `pagerduty`, `webhook`, `mattermost`, `rocketchat`, `irc`, `grafana`
+</ParamField>
+
+<ParamField body="notification_configuration" type="object" required>
+  Configuration specific to notification type
+</ParamField>
+
+### Test Notification
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/notification_templates/5/test/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Sends a test notification to verify configuration.
+
+## Notification Types
+
+### Email
+
+```json
+{
+  "notification_type": "email",
+  "notification_configuration": {
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "username": "user@gmail.com",
+    "password": "app_password",
+    "use_tls": true,
+    "sender": "AWX <awx@example.com>",
+    "recipients": ["team@example.com", "alerts@example.com"]
+  }
+}
+```
+
+### Slack
+
+```json
+{
+  "notification_type": "slack",
+  "notification_configuration": {
+    "token": "xoxb-slack-bot-token",
+    "channels": ["#ops", "#alerts"],
+    "hex_color": "#FF0000"
+  }
+}
+```
+
+### PagerDuty
+
+```json
+{
+  "notification_type": "pagerduty",
+  "notification_configuration": {
+    "token": "pagerduty-integration-key",
+    "subdomain": "mycompany",
+    "service_key": "service-api-key",
+    "client_name": "AWX"
+  }
+}
+```
+
+### Webhook
+
+```json
+{
+  "notification_type": "webhook",
+  "notification_configuration": {
+    "url": "https://api.example.com/webhook",
+    "http_method": "POST",
+    "headers": {
+      "Authorization": "Bearer token",
+      "Content-Type": "application/json"
+    },
+    "disable_ssl_verification": false
+  }
+}
+```
+
+### Mattermost
+
+```json
+{
+  "notification_type": "mattermost",
+  "notification_configuration": {
+    "url": "https://mattermost.example.com/hooks/webhook-id",
+    "username": "AWX",
+    "channel": "ansible",
+    "icon_url": "https://example.com/awx-icon.png"
+  }
+}
+```
+
+## Associate Notifications with Resources
+
+### Job Template Notifications
+
+#### Started Notifications
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/job_templates/10/notification_templates_started/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5}'
+```
+
+#### Success Notifications
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/job_templates/10/notification_templates_success/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5}'
+```
+
+#### Error Notifications
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/job_templates/10/notification_templates_error/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5}'
+```
+
+### Workflow Template Notifications
+
+```bash
+# Started
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_templates/5/notification_templates_started/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5}'
+
+# Success
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_templates/5/notification_templates_success/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5}'
+
+# Error
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_templates/5/notification_templates_error/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5}'
+
+# Approvals
+curl -X POST \
+  https://awx.example.com/api/v2/workflow_job_templates/5/notification_templates_approvals/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5}'
+```
+
+### Organization Notifications
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/organizations/1/notification_templates_started/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5}'
+```
+
+### Project Notifications
+
+```bash
+curl -X POST \
+  https://awx.example.com/api/v2/projects/5/notification_templates_success/ \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": 5}'
+```
+
+## Notifications
+
+### List Notifications
+
+Get notification history:
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/notifications/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Retrieve Notification
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/notifications/123/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+<ResponseField name="id" type="integer">
+  Notification ID
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Status: `pending`, `successful`, `failed`
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message if failed
+</ResponseField>
+
+<ResponseField name="notifications_sent" type="integer">
+  Number of notifications sent
+</ResponseField>
+
+<ResponseField name="notification_type" type="string">
+  Type of notification
+</ResponseField>
+
+<ResponseField name="recipients" type="string">
+  Notification recipients
+</ResponseField>
+
+<ResponseField name="subject" type="string">
+  Notification subject/title
+</ResponseField>
+
+<ResponseField name="body" type="object">
+  Notification message body
+</ResponseField>
+
+### Job Notifications
+
+```bash
+curl -X GET \
+  https://awx.example.com/api/v2/jobs/123/notifications/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Notification Messages
+
+Notification messages include job/workflow details:
+
+```json
+{
+  "id": 123,
+  "name": "Deploy Application",
+  "url": "https://awx.example.com/#/jobs/playbook/123",
+  "created_by": "admin",
+  "started": "2024-01-15T10:30:00Z",
+  "finished": "2024-01-15T10:35:00Z",
+  "status": "successful",
+  "traceback": "",
+  "inventory": "Production",
+  "project": "Ansible Playbooks",
+  "playbook": "site.yml",
+  "credential": "AWS Production",
+  "limit": "web*",
+  "extra_vars": "{\"env\": \"production\"}",
+  "hosts": {
+    "ok": 5,
+    "changed": 3,
+    "dark": 0,
+    "failures": 0,
+    "skipped": 1
+  }
+}
+```
+
+## Filtering
+
+```bash
+# By notification template
+?notification_template=5
+
+# By status
+?status=failed
+
+# By type
+?notification_type=slack
+
+# By date
+?created__gte=2024-01-01
+```
+
+## Complete Example
+
+```python
+import requests
+import json
+
+base_url = "https://awx.example.com/api/v2"
+token = "YOUR_TOKEN"
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
+
+# Create Slack notification template
+slack_template = {
+    "name": "Production Alerts",
+    "description": "Send alerts to production Slack channel",
+    "organization": 1,
+    "notification_type": "slack",
+    "notification_configuration": {
+        "token": "xoxb-your-token",
+        "channels": ["#production-alerts"],
+        "hex_color": "#FF0000"
+    }
+}
+
+response = requests.post(
+    f"{base_url}/notification_templates/",
+    headers=headers,
+    data=json.dumps(slack_template)
+)
+
+if response.status_code == 201:
+    template = response.json()
+    template_id = template['id']
+    print(f"Created notification template {template_id}")
+    
+    # Test notification
+    test_response = requests.post(
+        f"{base_url}/notification_templates/{template_id}/test/",
+        headers=headers
+    )
+    
+    if test_response.status_code == 200:
+        print("Test notification sent successfully")
+    
+    # Associate with job template (error notifications)
+    job_template_id = 10
+    assoc_response = requests.post(
+        f"{base_url}/job_templates/{job_template_id}/notification_templates_error/",
+        headers=headers,
+        data=json.dumps({"id": template_id})
+    )
+    
+    if assoc_response.status_code == 204:
+        print(f"Associated with job template {job_template_id}")
+else:
+    print(f"Error: {response.status_code}")
+    print(response.json())
+```

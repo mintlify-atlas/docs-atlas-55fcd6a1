@@ -1,0 +1,419 @@
+---
+title: Job Templates
+description: Understanding AWX Job Templates and job execution
+---
+
+## What is a Job Template?
+
+A **Job Template** is a reusable definition for running an Ansible playbook against an inventory with specific credentials and settings. Job templates are the primary way to launch automation jobs in AWX, providing a consistent interface for executing playbooks with parameterization and access control.
+
+<Info>
+Job templates act as a "play button" for your automation - they define what to run, where to run it, and how to run it.
+</Info>
+
+## Core Concepts
+
+### Required Components
+
+From the JobTemplate model (`awx/main/models/jobs.py:194-558`):
+
+A job template requires:
+
+1. **Project**: The source of playbooks
+2. **Playbook**: Specific playbook file from the project
+3. **Inventory** (or prompt on launch): Target hosts
+4. **Credentials**: Authentication for target systems
+
+### Key Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | String | Template name (unique within organization) |
+| `description` | String | Optional description |
+| `job_type` | Choice | `run` (execute playbook) or `check` (dry run) |
+| `inventory` | ForeignKey | Target inventory |
+| `project` | ForeignKey | Source project containing playbook |
+| `playbook` | String | Playbook filename (must exist in project) |
+| `scm_branch` | String | Override project branch (if allowed) |
+| `forks` | Integer | Ansible parallelism (0 = unlimited) |
+| `limit` | String | Limit job to specific hosts or groups |
+| `verbosity` | Integer | Ansible output verbosity (0-4) |
+| `extra_vars` | TextField | Additional variables (JSON or YAML) |
+| `job_tags` | String | Only run plays/tasks tagged with these |
+| `skip_tags` | String | Skip plays/tasks with these tags |
+| `start_at_task` | String | Start playbook at specific task |
+| `timeout` | Integer | Job timeout in seconds (0 = no timeout) |
+| `diff_mode` | Boolean | Show textual changes to templated files |
+| `become_enabled` | Boolean | Enable privilege escalation |
+| `allow_simultaneous` | Boolean | Allow multiple jobs from this template to run concurrently |
+| `use_fact_cache` | Boolean | Enable Ansible fact caching |
+| `job_slice_count` | Integer | Number of job slices for parallel execution |
+
+## Prompting on Launch
+
+Job templates can be configured to prompt for values at launch time using `ask_*_on_launch` fields:
+
+```python
+# From jobs.py:225-257
+ask_diff_mode_on_launch = AskForField(blank=True, default=False)
+ask_job_type_on_launch = AskForField(blank=True, default=False)
+ask_verbosity_on_launch = AskForField(blank=True, default=False)
+ask_credential_on_launch = AskForField(blank=True, default=False, allows_field='credentials')
+ask_execution_environment_on_launch = AskForField(blank=True, default=False)
+ask_forks_on_launch = AskForField(blank=True, default=False)
+ask_job_slice_count_on_launch = AskForField(blank=True, default=False)
+ask_timeout_on_launch = AskForField(blank=True, default=False)
+ask_instance_groups_on_launch = AskForField(blank=True, default=False)
+```
+
+<Warning>
+Prompted credentials and variables override the template's defaults. Ensure users understand the security implications of prompted launches.
+</Warning>
+
+## Credentials
+
+Job templates support multiple credential types simultaneously:
+
+```python
+# From jobs.py:167-181
+@property
+def machine_credential(self):
+    return self.credentials.filter(credential_type__kind='ssh').first()
+
+@property
+def network_credentials(self):
+    return list(self.credentials.filter(credential_type__kind='net'))
+
+@property
+def cloud_credentials(self):
+    return list(self.credentials.filter(credential_type__kind='cloud'))
+
+@property
+def vault_credentials(self):
+    return list(self.credentials.filter(credential_type__kind='vault'))
+```
+
+You can attach:
+- One SSH credential (machine credential)
+- Multiple network credentials
+- Multiple cloud credentials  
+- Multiple vault credentials
+
+## Extra Variables
+
+Extra variables follow a specific precedence order:
+
+1. Job launch extra vars (highest)
+2. Survey answers
+3. Job template extra vars
+4. Inventory variables
+5. Host/group variables (lowest)
+
+Variables are merged at runtime:
+
+```python
+# From jobs.py:164
+extra_vars_dict = VarsDictProperty('extra_vars', True)
+```
+
+## Surveys
+
+Job templates can have surveys that prompt users for input:
+
+```json
+{
+  "name": "Survey",
+  "description": "Survey description",
+  "spec": [
+    {
+      "question_name": "What is your environment?",
+      "question_description": "Select target environment",
+      "required": true,
+      "type": "multiplechoice",
+      "variable": "target_environment",
+      "choices": ["dev", "staging", "production"],
+      "default": "dev"
+    },
+    {
+      "question_name": "Number of instances",
+      "question_description": "How many instances?",
+      "required": true,
+      "type": "integer",
+      "variable": "instance_count",
+      "min": 1,
+      "max": 10,
+      "default": 1
+    },
+    {
+      "question_name": "API Key",
+      "question_description": "API Key",
+      "required": true,
+      "type": "password",
+      "variable": "api_key"
+    }
+  ]
+}
+```
+
+Survey answers are passed as extra variables. Password-type questions are encrypted.
+
+## Job Slicing
+
+Job slicing enables parallel execution across multiple job instances:
+
+```python
+# From jobs.py:359-383
+def create_unified_job(self, **kwargs):
+    prevent_slicing = kwargs.pop('_prevent_slicing', False)
+    slice_ct = self.get_effective_slice_ct(kwargs)
+    slice_event = bool(slice_ct > 1 and (not prevent_slicing))
+    if slice_event:
+        # A Slice Job Template will generate a WorkflowJob rather than a Job
+        from awx.main.models.workflow import WorkflowJobTemplate, WorkflowJobNode
+
+        kwargs['_unified_job_class'] = WorkflowJobTemplate._get_unified_job_class()
+        kwargs['_parent_field_name'] = "job_template"
+        kwargs.setdefault('_eager_fields', {})
+        kwargs['_eager_fields']['is_sliced_job'] = True
+```
+
+When `job_slice_count > 1`, AWX:
+1. Creates a workflow job instead of a regular job
+2. Creates one job node per slice
+3. Distributes inventory hosts across slices
+4. Runs slices in parallel
+
+<Tip>
+Job slicing is effective for large inventories with independent hosts. It won't speed up playbooks with dependencies between hosts.
+</Tip>
+
+## Jobs
+
+When a job template is launched, it creates a **Job** (`awx/main/models/jobs.py:560-868`):
+
+### Job Lifecycle
+
+<Steps>
+  <Step title="Pending">
+    Job is created and queued
+  </Step>
+  <Step title="Waiting">
+    Job is waiting for dependencies (project updates, inventory updates)
+  </Step>
+  <Step title="Running">
+    Job is executing on an AWX instance
+  </Step>
+  <Step title="Completed">
+    Job finished with status: `successful`, `failed`, `error`, or `canceled`
+  </Step>
+</Steps>
+
+### Job Fields
+
+Jobs inherit all fields from the job template plus:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `job_template` | ForeignKey | Source template |
+| `status` | String | Current job status |
+| `started` | DateTime | When job execution started |
+| `finished` | DateTime | When job completed |
+| `elapsed` | Float | Execution time in seconds |
+| `artifacts` | JSON | Artifacts from `set_stats` module |
+| `scm_revision` | String | Git commit used from project |
+| `project_update` | ForeignKey | Related project update job |
+| `job_slice_number` | Integer | Slice number (if sliced) |
+| `job_slice_count` | Integer | Total slices (if sliced) |
+
+### Dependencies
+
+Jobs may wait for dependencies before running:
+
+```python
+# From jobs.py:638-650
+def _set_default_dependencies_processed(self):
+    """
+    This sets the initial value of dependencies_processed
+    and here we use this as a shortcut to avoid the DependencyManager for jobs that do not need it
+    """
+    if (not self.project) or self.project.scm_update_on_launch:
+        self.dependencies_processed = False
+    elif (not self.inventory) or self.inventory.inventory_sources.filter(update_on_launch=True).exists():
+        self.dependencies_processed = False
+    else:
+        # No dependencies to process
+        self.dependencies_processed = True
+```
+
+Dependencies include:
+- Project updates (if `scm_update_on_launch`)
+- Inventory updates (if inventory sources have `update_on_launch`)
+
+## Execution Environments
+
+Job templates can specify an execution environment:
+
+```python
+# From unified_jobs.py (inherited)
+execution_environment = models.ForeignKey(
+    'ExecutionEnvironment',
+    null=True,
+    blank=True,
+    default=None,
+    on_delete=polymorphic.SET_NULL,
+    related_name='%(class)ss',
+    help_text=_('The container image to be used for execution.')
+)
+```
+
+If not specified, the execution environment is resolved from:
+1. Job template's `execution_environment`
+2. Project's `default_environment`
+3. Organization's `default_environment`
+4. Global default execution environment
+
+## Instance Groups
+
+Job templates can specify which instance groups run the job:
+
+```python
+# From jobs.py:804-816
+@property
+def preferred_instance_groups(self):
+    # If the user specified instance groups those will be handled by the unified_job.create_unified_job
+    # This function handles only the defaults for a template w/o user specification
+    selected_groups = []
+    for obj_type in ['job_template', 'inventory', 'organization']:
+        if getattr(self, obj_type) is not None:
+            for instance_group in getattr(self, obj_type).instance_groups.all():
+                selected_groups.append(instance_group)
+            if getattr(getattr(self, obj_type), 'prevent_instance_group_fallback', False):
+                break
+```
+
+Instance groups control where jobs execute in clustered/containerized environments.
+
+## API Endpoints
+
+### List Job Templates
+```http
+GET /api/v2/job_templates/
+```
+
+### Create Job Template
+```http
+POST /api/v2/job_templates/
+Content-Type: application/json
+
+{
+  "name": "Deploy Application",
+  "description": "Deploy app to production",
+  "job_type": "run",
+  "inventory": 1,
+  "project": 2,
+  "playbook": "deploy.yml",
+  "credentials": [3, 4],
+  "forks": 10,
+  "limit": "webservers",
+  "verbosity": 1,
+  "extra_vars": "---\napp_version: 1.2.3",
+  "ask_variables_on_launch": true,
+  "ask_limit_on_launch": true
+}
+```
+
+### Launch Job
+```http
+POST /api/v2/job_templates/{id}/launch/
+Content-Type: application/json
+
+{
+  "extra_vars": {
+    "app_version": "1.2.4"
+  },
+  "limit": "web01.example.com"
+}
+```
+
+### Cancel Job
+```http
+POST /api/v2/jobs/{id}/cancel/
+```
+
+### Relaunch Job
+```http
+POST /api/v2/jobs/{id}/relaunch/
+```
+
+## Permissions
+
+Job templates have these roles (`jobs.py:264-275`):
+
+- **Admin Role**: Full control over the template
+- **Execute Role**: Can launch jobs
+- **Read Role**: Can view template details
+
+<Tip>
+The execute role is inherited from the organization's `execute_role`, making it easy to give users permission to run automation across all templates in an organization.
+</Tip>
+
+## Notifications
+
+Job templates can trigger notifications on job events:
+
+```python
+# From jobs.py:527-550
+@property
+def notification_templates(self):
+    base_notification_templates = NotificationTemplate.objects
+    error_notification_templates = list(base_notification_templates.filter(
+        unifiedjobtemplate_notification_templates_for_errors__in=[self, self.project]
+    ))
+    started_notification_templates = list(base_notification_templates.filter(
+        unifiedjobtemplate_notification_templates_for_started__in=[self, self.project]
+    ))
+    success_notification_templates = list(base_notification_templates.filter(
+        unifiedjobtemplate_notification_templates_for_success__in=[self, self.project]
+    ))
+```
+
+Notifications can be sent:
+- When job starts (`started`)
+- When job succeeds (`success`)
+- When job fails (`error`)
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Surveys for User Input">
+    Instead of prompting for raw extra_vars, create surveys with typed inputs (integers, choices, etc.) for better UX and validation.
+  </Accordion>
+  
+  <Accordion title="Enable Fact Caching">
+    Set `use_fact_cache: true` to cache Ansible facts. This speeds up subsequent runs and enables fact-based smart inventories.
+  </Accordion>
+  
+  <Accordion title="Set Appropriate Timeouts">
+    Always set a timeout to prevent runaway jobs. Consider the longest expected runtime plus buffer.
+  </Accordion>
+  
+  <Accordion title="Use Limit for Targeted Runs">
+    Use the `limit` field or prompt for it to run playbooks against subsets of inventory without creating duplicate templates.
+  </Accordion>
+  
+  <Accordion title="Leverage Job Slicing">
+    For large inventories with independent hosts, use job slicing to parallelize execution and reduce total runtime.
+  </Accordion>
+  
+  <Accordion title="Control Simultaneous Execution">
+    Only enable `allow_simultaneous` if your playbooks are idempotent and safe to run concurrently.
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+- [Projects](/concepts/projects) - Source of playbooks
+- [Inventories](/concepts/inventories) - Target hosts
+- [Credentials](/concepts/credentials) - Authentication
+- [Workflows](/concepts/workflows) - Chain multiple job templates
+- [Execution Environments](/concepts/execution-environments) - Container images for execution

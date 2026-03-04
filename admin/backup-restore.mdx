@@ -1,0 +1,409 @@
+---
+title: Backup and Restore
+description: Backup procedures for AWX database, configuration, and operator-based deployments
+---
+
+## Overview
+
+AWX stores critical data in PostgreSQL and configuration settings in the database and file system. Regular backups ensure you can recover from system failures, migrate to new infrastructure, or rollback problematic changes.
+
+<Warning>
+  Always test your backup and restore procedures in a non-production environment before relying on them for disaster recovery.
+</Warning>
+
+## Database Backups
+
+### PostgreSQL Direct Backup
+
+AWX uses PostgreSQL to store all persistent data including job history, credentials (encrypted), inventory, and configuration settings.
+
+#### Full Database Backup
+
+Use `pg_dump` to create a complete backup of the AWX database:
+
+```bash
+pg_dump -h <postgres_host> -U <postgres_user> -d <database_name> -F c -f awx_backup_$(date +%Y%m%d_%H%M%S).dump
+```
+
+**Backup options:**
+- `-F c` — Custom format (compressed, supports selective restore)
+- `-F p` — Plain SQL format (human-readable)
+- `-F t` — Tar format
+
+<Tip>
+  Use custom format (`-F c`) for production backups. It provides compression and allows selective restoration of specific tables.
+</Tip>
+
+#### Scheduled Backups
+
+Create a cron job for automated daily backups:
+
+```bash
+# /etc/cron.d/awx-backup
+0 2 * * * postgres pg_dump -h localhost -U awx -d awx -F c -f /backup/awx_$(date +\%Y\%m\%d).dump && find /backup -name "awx_*.dump" -mtime +30 -delete
+```
+
+This configuration:
+- Runs daily at 2:00 AM
+- Creates compressed backups
+- Automatically removes backups older than 30 days
+
+### Kubernetes PostgreSQL Backup
+
+For AWX deployed in Kubernetes with an external PostgreSQL database:
+
+```bash
+# Backup from within the cluster
+kubectl exec -n awx deployment/awx-postgres-13 -- \
+  pg_dump -U awx -d awx -F c > awx_backup_$(date +%Y%m%d).dump
+```
+
+### Restoring Database Backups
+
+#### Restore from Custom Format
+
+```bash
+pg_restore -h <postgres_host> -U <postgres_user> -d <database_name> -c awx_backup.dump
+```
+
+**Restore options:**
+- `-c` — Clean (drop) database objects before recreating
+- `-C` — Create the database before restoring
+- `--if-exists` — Use with `-c` to suppress errors if objects don't exist
+
+#### Restore from SQL Format
+
+```bash
+psql -h <postgres_host> -U <postgres_user> -d <database_name> < awx_backup.sql
+```
+
+<Warning>
+  Restoring a backup will overwrite all existing data in the target database. Always verify you're restoring to the correct database.
+</Warning>
+
+## AWX Operator Backup
+
+The AWX Operator provides built-in backup and restore capabilities for Kubernetes-based deployments.
+
+### Creating Operator Backups
+
+Define an `AWXBackup` custom resource:
+
+```yaml awx-backup.yaml
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXBackup
+metadata:
+  name: awx-backup-2024
+  namespace: awx
+spec:
+  deployment_name: awx
+  backup_pvc: awx-backup-claim
+  backup_pvc_namespace: awx
+```
+
+Apply the backup:
+
+```bash
+kubectl apply -f awx-backup.yaml
+```
+
+Check backup status:
+
+```bash
+kubectl get awxbackup -n awx
+kubectl describe awxbackup awx-backup-2024 -n awx
+```
+
+### Scheduled Operator Backups
+
+Create a CronJob for automated backups:
+
+```yaml awx-backup-cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: awx-backup-daily
+  namespace: awx
+spec:
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: awx-operator-service-account
+          containers:
+          - name: backup
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              cat <<EOF | kubectl apply -f -
+              apiVersion: awx.ansible.com/v1beta1
+              kind: AWXBackup
+              metadata:
+                name: awx-backup-$(date +%Y%m%d-%H%M%S)
+                namespace: awx
+              spec:
+                deployment_name: awx
+                backup_pvc: awx-backup-claim
+              EOF
+          restartPolicy: OnFailure
+```
+
+### Restoring from Operator Backup
+
+Define an `AWXRestore` custom resource:
+
+```yaml awx-restore.yaml
+apiVersion: awx.ansible.com/v1beta1
+kind: AWXRestore
+metadata:
+  name: awx-restore-2024
+  namespace: awx
+spec:
+  deployment_name: awx
+  backup_name: awx-backup-2024
+  backup_pvc: awx-backup-claim
+  backup_pvc_namespace: awx
+```
+
+Apply the restore:
+
+```bash
+kubectl apply -f awx-restore.yaml
+```
+
+Monitor restore progress:
+
+```bash
+kubectl logs -f deployment/awx-operator-controller-manager -n awx
+kubectl get awxrestore -n awx
+```
+
+<Info>
+  The AWX Operator backup includes the database dump, secret keys, and configuration. The restore process automatically handles database restoration and secret key configuration.
+</Info>
+
+## Configuration Backup
+
+AWX configuration includes settings stored in the database and file-based settings.
+
+### Exporting Settings via API
+
+Export all configuration settings:
+
+```bash
+# Export all settings
+curl -X GET https://awx.example.org/api/v2/settings/all/ \
+  -H "Authorization: Bearer <token>" \
+  -o awx_settings_backup.json
+
+# Export specific categories
+curl -X GET https://awx.example.org/api/v2/settings/system/ \
+  -H "Authorization: Bearer <token>" \
+  -o awx_settings_system.json
+```
+
+### File-Based Configuration
+
+Backup custom configuration files from `/etc/tower/conf.d/`:
+
+```bash
+# For traditional deployments
+tar -czf awx_config_$(date +%Y%m%d).tar.gz /etc/tower/conf.d/
+
+# For Kubernetes deployments
+kubectl exec -n awx deployment/awx-web -c awx-web -- \
+  tar -czf - /etc/tower/conf.d/ > awx_config_$(date +%Y%m%d).tar.gz
+```
+
+### Restoring Configuration
+
+Restore settings via the API:
+
+```bash
+curl -X PATCH https://awx.example.org/api/v2/settings/all/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d @awx_settings_backup.json
+```
+
+<Warning>
+  Encrypted settings (like external service tokens) may not be directly restorable. You may need to re-enter sensitive values after restoration.
+</Warning>
+
+## Secret Key Management
+
+The `SECRET_KEY` is critical for encrypting sensitive data. Losing it makes encrypted credentials unrecoverable.
+
+### Backing Up the Secret Key
+
+```bash
+# For traditional deployments
+cp /etc/tower/SECRET_KEY /backup/SECRET_KEY_$(date +%Y%m%d)
+
+# For Kubernetes deployments
+kubectl get secret -n awx awx-secret-key -o jsonpath='{.data.secret_key}' | base64 -d > SECRET_KEY_backup
+```
+
+### Restoring the Secret Key
+
+**Kubernetes:**
+
+```bash
+kubectl create secret generic awx-secret-key \
+  --from-file=secret_key=./SECRET_KEY_backup \
+  -n awx --dry-run=client -o yaml | kubectl apply -f -
+```
+
+**Traditional deployment:**
+
+```bash
+cp SECRET_KEY_backup /etc/tower/SECRET_KEY
+chmod 600 /etc/tower/SECRET_KEY
+chown awx:awx /etc/tower/SECRET_KEY
+```
+
+<Danger>
+  If you restore a database backup without the matching SECRET_KEY, all encrypted credentials will be unreadable and must be re-created.
+</Danger>
+
+## Backup Verification
+
+Regularly verify your backups to ensure they're valid:
+
+```bash
+# Test database backup integrity
+pg_restore --list awx_backup.dump | head -20
+
+# Test restore to a temporary database
+createdb -h localhost -U postgres awx_test
+pg_restore -h localhost -U postgres -d awx_test awx_backup.dump
+psql -h localhost -U postgres -d awx_test -c "SELECT COUNT(*) FROM main_jobevent;"
+dropdb -h localhost -U postgres awx_test
+```
+
+## Backup Best Practices
+
+<AccordionGroup>
+  <Accordion title="Backup frequency">
+    - **Production:** Daily full backups, hourly incremental if possible
+    - **Development:** Weekly backups or before major changes
+    - **Critical systems:** Consider continuous replication
+  </Accordion>
+
+  <Accordion title="Retention policy">
+    - Keep daily backups for 7 days
+    - Keep weekly backups for 4 weeks
+    - Keep monthly backups for 1 year
+    - Adjust based on compliance requirements and storage capacity
+  </Accordion>
+
+  <Accordion title="Off-site storage">
+    - Store backups in a different physical location or cloud region
+    - Use encryption for backups stored in untrusted locations
+    - Test restoration from off-site backups regularly
+  </Accordion>
+
+  <Accordion title="Backup monitoring">
+    - Set up alerts for failed backup jobs
+    - Monitor backup file sizes for anomalies
+    - Track backup duration trends
+    - Verify backup completion before purging old backups
+  </Accordion>
+</AccordionGroup>
+
+## Migration and Disaster Recovery
+
+### Complete System Migration
+
+To migrate AWX to new infrastructure:
+
+<Steps>
+  <Step title="Backup current system">
+    Create a full database backup and export the SECRET_KEY:
+    ```bash
+    pg_dump -h localhost -U awx -d awx -F c -f awx_migration.dump
+    kubectl get secret awx-secret-key -n awx -o yaml > secret-key-backup.yaml
+    ```
+  </Step>
+
+  <Step title="Install AWX on new infrastructure">
+    Deploy AWX using the operator or your preferred method, but don't start it yet.
+  </Step>
+
+  <Step title="Restore SECRET_KEY">
+    Apply the secret key to the new cluster:
+    ```bash
+    kubectl apply -f secret-key-backup.yaml -n awx
+    ```
+  </Step>
+
+  <Step title="Restore database">
+    Load the database backup:
+    ```bash
+    pg_restore -h new-postgres-host -U awx -d awx -c awx_migration.dump
+    ```
+  </Step>
+
+  <Step title="Verify and start">
+    Start AWX and verify all systems are operational. Test credential decryption by running a simple job.
+  </Step>
+</Steps>
+
+### Disaster Recovery Checklist
+
+- [ ] Latest database backup is available and tested
+- [ ] SECRET_KEY is backed up securely
+- [ ] File-based configuration is backed up
+- [ ] Restoration procedure is documented
+- [ ] Recovery time objective (RTO) is defined and achievable
+- [ ] Recovery point objective (RPO) is defined and met by backup frequency
+- [ ] Team members are trained on restoration procedures
+- [ ] Disaster recovery procedure is tested quarterly
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Backup fails with permission errors">
+    Ensure the backup user has sufficient PostgreSQL permissions:
+    ```sql
+    GRANT SELECT ON ALL TABLES IN SCHEMA public TO backup_user;
+    GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO backup_user;
+    ```
+  </Accordion>
+
+  <Accordion title="Restore fails with constraint violations">
+    Use the `-c` flag to clean the database before restoring:
+    ```bash
+    pg_restore -h localhost -U awx -d awx -c --if-exists awx_backup.dump
+    ```
+  </Accordion>
+
+  <Accordion title="Credentials not decrypting after restore">
+    Verify the SECRET_KEY matches the one used during backup:
+    ```bash
+    # Compare checksums
+    md5sum /etc/tower/SECRET_KEY
+    md5sum /backup/SECRET_KEY_backup
+    ```
+    If they don't match, restore the correct SECRET_KEY and restart AWX.
+  </Accordion>
+
+  <Accordion title="AWX Operator backup PVC full">
+    Increase PVC size or clean up old backups:
+    ```bash
+    kubectl get pvc -n awx
+    kubectl exec -n awx -it <pod-name> -- df -h /backups
+    # Delete old backup CRs
+    kubectl delete awxbackup <old-backup-name> -n awx
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## See Also
+
+- [Configuration](/admin/configuration) — AWX configuration management
+- [Security](/admin/security) — Credential encryption and security features
+- [Metrics](/admin/metrics) — Monitoring backup job performance

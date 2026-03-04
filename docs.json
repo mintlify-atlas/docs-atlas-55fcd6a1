@@ -1,122 +1,186 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "AWX",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#f41c7c",
+    "light": "#1c1434",
+    "dark": "#fc7cbc"
   },
-  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "https://media.brand.dev/99afb4b8-4331-498b-aff4-43ebcee1882e.svg",
+    "dark": "https://media.brand.dev/99afb4b8-4331-498b-aff4-43ebcee1882e.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/ansible/awx"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/ansible/awx"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Overview",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "getting-started",
+              "architecture"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Installation",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "installation/overview",
+              "installation/awx-operator",
+              "installation/docker-compose",
+              "installation/requirements"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "concepts/projects",
+              "concepts/inventories",
+              "concepts/job-templates",
+              "concepts/credentials",
+              "concepts/workflows",
+              "concepts/execution-environments"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "User Guide",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "guides/organizations-and-teams",
+              "guides/creating-projects",
+              "guides/managing-inventories",
+              "guides/running-jobs",
+              "guides/scheduling",
+              "guides/notifications",
+              "guides/surveys"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "advanced/workflows",
+              "advanced/rbac",
+              "advanced/container-groups",
+              "advanced/clustering",
+              "advanced/fact-caching",
+              "advanced/webhooks"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/overview",
+              "integrations/source-control",
+              "integrations/cloud-providers",
+              "integrations/logging",
+              "integrations/notifications"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "admin/configuration",
+              "admin/capacity",
+              "admin/metrics",
+              "admin/backup-restore",
+              "admin/security"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Getting Started",
             "pages": [
-              "api-reference/introduction"
+              "api/overview",
+              "api/authentication",
+              "api/pagination",
+              "api/filtering"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Core Resources",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/organizations",
+              "api/teams",
+              "api/users",
+              "api/projects",
+              "api/inventories",
+              "api/credentials"
+            ]
+          },
+          {
+            "group": "Job Management",
+            "pages": [
+              "api/job-templates",
+              "api/jobs",
+              "api/workflow-job-templates",
+              "api/workflow-jobs",
+              "api/schedules"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "api/activity-stream",
+              "api/notifications",
+              "api/bulk-api",
+              "api/websockets"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI",
+        "groups": [
+          {
+            "group": "AWX CLI",
+            "pages": [
+              "cli/installation",
+              "cli/configuration",
+              "cli/usage",
+              "cli/commands"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Contributing",
+            "pages": [
+              "development/contributing",
+              "development/setup",
+              "development/building",
+              "development/testing"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "development/architecture-overview",
+              "development/task-manager",
+              "development/dispatcher",
+              "development/ansible-integration"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

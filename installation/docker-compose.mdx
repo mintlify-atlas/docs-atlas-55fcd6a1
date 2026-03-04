@@ -1,0 +1,697 @@
+---
+title: 'Docker Compose Installation'
+description: 'Set up a local AWX development environment using Docker Compose'
+keywords: ['awx', 'docker', 'docker-compose', 'development', 'local']
+icon: 'docker'
+---
+
+The Docker Compose installation method provides a complete AWX development environment that runs locally on your machine. This method is designed exclusively for **development, testing, and demonstration purposes**.
+
+<Warning>
+  The Docker Compose installation path is **only recommended for development/test-oriented deployments** and has no official published release. Never use this method for production environments.
+</Warning>
+
+<Check>
+  For production deployments, use the [AWX Operator](/installation/awx-operator) installation method.
+</Check>
+
+## Overview
+
+The Docker Compose development environment:
+
+- Runs AWX and all dependencies (PostgreSQL, Redis) in containers
+- Bind-mounts your local source code for real-time development
+- Provides hot-reloading for code changes
+- Includes development tools and debugging capabilities
+- Supports multi-node cluster configurations for testing
+- Integrates with external services (Splunk, Vault, Prometheus, etc.) for testing
+
+## Prerequisites
+
+Before setting up the development environment, ensure you have the following installed:
+
+<AccordionGroup>
+  <Accordion title="Docker">
+    Docker Engine must be installed and running on your host machine.
+    
+    <Tabs>
+      <Tab title="Linux">
+        Install Docker CE for your distribution:
+        
+        - **Fedora**: [Docker CE for Fedora](https://docs.docker.com/engine/installation/linux/docker-ce/fedora/)
+        - **CentOS**: [Docker CE for CentOS](https://docs.docker.com/engine/installation/linux/docker-ce/centos/)
+        - **Ubuntu**: [Docker CE for Ubuntu](https://docs.docker.com/engine/installation/linux/docker-ce/ubuntu/)
+        - **Debian**: [Docker CE for Debian](https://docs.docker.com/engine/installation/linux/docker-ce/debian/)
+        - **Arch**: [Docker for Arch Linux](https://wiki.archlinux.org/index.php/Docker)
+        
+        After installation, start the Docker service and add your user to the docker group:
+        
+        ```bash
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        sudo usermod -aG docker $USER
+        ```
+        
+        Log out and back in for group changes to take effect.
+      </Tab>
+      
+      <Tab title="macOS">
+        Install [Docker Desktop for Mac](https://www.docker.com/docker-mac).
+        
+        Docker Desktop includes Docker Engine, Docker Compose, and other required components.
+      </Tab>
+      
+      <Tab title="Windows">
+        Install [Docker Desktop for Windows](https://www.docker.com/docker-windows).
+        
+        Ensure WSL 2 backend is enabled for better performance.
+      </Tab>
+    </Tabs>
+    
+    Verify Docker installation:
+    
+    ```bash
+    docker --version
+    docker ps
+    ```
+  </Accordion>
+  
+  <Accordion title="Docker Compose">
+    Docker Compose is required to orchestrate multiple containers.
+    
+    **Docker Desktop users**: Docker Compose is included.
+    
+    **Linux users**: Install the `docker-compose` plugin or standalone binary:
+    
+    ```bash
+    # Using pip
+    pip3 install docker-compose
+    
+    # Or using your package manager
+    sudo apt-get install docker-compose  # Debian/Ubuntu
+    sudo dnf install docker-compose      # Fedora
+    ```
+    
+    Verify installation:
+    
+    ```bash
+    docker compose version
+    ```
+  </Accordion>
+  
+  <Accordion title="Ansible">
+    Ansible is used to template configuration files for docker-compose.
+    
+    ```bash
+    # Using pip
+    pip3 install ansible
+    
+    # Or using your package manager
+    sudo apt-get install ansible  # Debian/Ubuntu
+    sudo dnf install ansible      # Fedora
+    ```
+    
+    Verify installation:
+    
+    ```bash
+    ansible --version
+    ```
+  </Accordion>
+  
+  <Accordion title="OpenSSL">
+    OpenSSL is required for generating SSL certificates.
+    
+    Most systems have OpenSSL pre-installed. Verify:
+    
+    ```bash
+    openssl version
+    ```
+  </Accordion>
+  
+  <Accordion title="System Resources">
+    Ensure your system has adequate resources:
+    
+    - **CPU**: 4+ cores recommended
+    - **RAM**: 8GB minimum, 16GB recommended
+    - **Disk**: 20GB+ free space
+    - **OS**: Tested on Fedora, Ubuntu LTS (18, 20), RHEL 8, CentOS Stream 8, macOS 11
+  </Accordion>
+</AccordionGroup>
+
+## Getting Started
+
+<Steps>
+  <Step title="Clone the AWX repository">
+    Clone the AWX repository from GitHub. It's recommended to clone a stable release tag rather than the latest commit:
+    
+    ```bash
+    # View available releases
+    # https://github.com/ansible/awx/releases/latest
+    
+    # Clone a specific release (replace x.y.z with the version)
+    git clone -b x.y.z https://github.com/ansible/awx.git
+    cd awx
+    ```
+    
+    <Warning>
+      Deploying from `HEAD` (or the latest commit) is **not stable**. Proceed at your own risk if you choose to use the development branch.
+    </Warning>
+    
+    For development work, clone the devel branch:
+    
+    ```bash
+    git clone https://github.com/ansible/awx.git
+    cd awx
+    git checkout devel
+    ```
+  </Step>
+  
+  <Step title="Build the development image">
+    Build the AWX development Docker image:
+    
+    ```bash
+    make docker-compose-build
+    ```
+    
+    This builds the `ansible/awx_devel` image containing:
+    - Operating system dependencies
+    - Python environment with AWX requirements
+    - Development tools
+    - Symbolic links to your local source code
+    
+    <Info>
+      The build process may take 10-20 minutes depending on your internet connection and system performance.
+    </Info>
+    
+    **Skip building**: To use the latest pre-built image from GitHub Container Registry instead of building locally:
+    
+    ```bash
+    # Pull the latest devel image
+    docker pull ghcr.io/ansible/awx_devel:devel
+    ```
+    
+    Then proceed directly to starting the containers.
+  </Step>
+  
+  <Step title="Customize configuration (optional)">
+    Edit the inventory file to customize your development environment:
+    
+    ```bash
+    vim tools/docker-compose/inventory
+    ```
+    
+    ```ini tools/docker-compose/inventory
+    localhost ansible_connection=local ansible_python_interpreter="/usr/bin/env python3"
+    
+    [all:vars]
+    
+    # AWX-Managed Database Settings
+    # If left blank, these will be generated upon install.
+    # Values are written out to tools/docker-compose/_sources/secrets/
+    # pg_password=""
+    # broadcast_websocket_secret=""
+    # secret_key=""
+    
+    # External Database Settings
+    # pg_host=""
+    # pg_password=""
+    # pg_username=""
+    # pg_hostname=""
+    
+    # awx_image="ghcr.io/ansible/awx_devel"
+    # migrate_local_docker=false
+    ```
+    
+    <Tip>
+      Most users can use the default configuration. Custom settings are only needed for external databases or specific development scenarios.
+    </Tip>
+  </Step>
+  
+  <Step title="Start the development environment">
+    Start all AWX containers and services:
+    
+    ```bash
+    make docker-compose
+    ```
+    
+    This command:
+    - Creates and starts the AWX, PostgreSQL, and Redis containers
+    - Runs database migrations
+    - Builds the UI (if not already built)
+    - Attaches your terminal to the AWX container logs
+    
+    You'll see output from Django and the frontend build process. Wait for migrations to complete:
+    
+    ```
+    awx_1        | Operations to perform:
+    awx_1        |   Synchronize unmigrated apps: solo, api, staticfiles, messages...
+    awx_1        |   Apply all migrations: sso, taggit, sessions, sites, main...
+    awx_1        | Running migrations:
+    awx_1        |   Applying contenttypes.0001_initial... OK
+    awx_1        |   Applying auth.0001_initial... OK
+    awx_1        |   ...
+    ```
+    
+    <Info>
+      The first startup takes several minutes as the database is initialized and migrations run.
+    </Info>
+  </Step>
+</Steps>
+
+## Building the UI
+
+The AWX web interface must be built separately. This requires Node.js and npm on your **local machine** (not inside the container).
+
+<Steps>
+  <Step title="Install Node.js and npm">
+    Install the required Node.js version. Check the [ansible-ui README](https://github.com/ansible/ansible-ui/blob/main/README.md) for the exact version requirements.
+    
+    ```bash
+    # Using nvm (recommended)
+    nvm install 18
+    nvm use 18
+    
+    # Or using your package manager
+    # Ubuntu/Debian
+    curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+    
+    # Fedora
+    sudo dnf install nodejs npm
+    ```
+  </Step>
+  
+  <Step title="Build the UI">
+    On your local machine (outside the container):
+    
+    ```bash
+    make clean-ui ui
+    ```
+    
+    This clones the ansible-ui repository into `awx/ui/src` and builds the static files. When containers start, `awx-manage collectstatic` copies these files to the proper location.
+  </Step>
+  
+  <Step title="Use local UI repo (optional)">
+    To use a locally cloned ansible-ui repository for UI development:
+    
+    ```bash
+    UI_LOCAL=/path/to/ansible-ui make ui
+    ```
+  </Step>
+</Steps>
+
+For more information on UI development, see the [ansible-ui contributing guide](https://github.com/ansible/ansible-ui/blob/main/CONTRIBUTING.md).
+
+## Accessing AWX
+
+Once the containers are running and migrations are complete:
+
+<Tabs>
+  <Tab title="Web Interface">
+    Access the AWX web interface at:
+    
+    ```
+    https://localhost:8043/
+    ```
+    
+    <Info>
+      You'll see a browser warning about the self-signed SSL certificate. This is expected in the development environment.
+    </Info>
+  </Tab>
+  
+  <Tab title="API">
+    Access the REST API at:
+    
+    ```
+    https://localhost:8043/api/v2/
+    ```
+    
+    The API is browsable in your web browser and provides a complete interface to AWX functionality.
+  </Tab>
+</Tabs>
+
+### Create an Admin User
+
+Before logging in, create an admin superuser:
+
+```bash
+docker exec -ti tools_awx_1 awx-manage createsuperuser
+```
+
+Follow the prompts to set:
+- Username (e.g., `admin`)
+- Email address
+- Password
+
+<Check>
+  Remember these credentials - you'll use them to log into the web interface.
+</Check>
+
+### Load Demo Data (Optional)
+
+For testing, you can load demo projects, inventories, and job templates:
+
+```bash
+docker exec tools_awx_1 awx-manage create_preload_data
+```
+
+This creates sample data to help you explore AWX features.
+
+## Development Workflow
+
+### Working with the Source Code
+
+Your local AWX source tree is bind-mounted into the container at `/awx_devel`. Changes you make to Python code, templates, or other files are immediately available inside the container.
+
+<AccordionGroup>
+  <Accordion title="Start a shell in the container">
+    To run commands or explore inside the AWX container:
+    
+    ```bash
+    docker exec -it tools_awx_1 bash
+    ```
+    
+    From this shell, you can:
+    - Run management commands: `awx-manage <command>`
+    - Inspect logs: `tail -f /var/log/supervisor/*`
+    - Test database queries: `awx-manage dbshell`
+    - Run Python interactively: `awx-manage shell`
+  </Accordion>
+  
+  <Accordion title="Run management commands">
+    Execute AWX management commands from your host:
+    
+    ```bash
+    # List all management commands
+    docker exec tools_awx_1 awx-manage help
+    
+    # Run migrations
+    docker exec tools_awx_1 awx-manage migrate
+    
+    # Create a superuser
+    docker exec tools_awx_1 awx-manage createsuperuser
+    
+    # Collect static files
+    docker exec tools_awx_1 awx-manage collectstatic --noinput
+    
+    # Open Django shell
+    docker exec -it tools_awx_1 awx-manage shell
+    ```
+  </Accordion>
+  
+  <Accordion title="View logs">
+    Monitor AWX logs in real-time:
+    
+    ```bash
+    # Follow all supervisor logs
+    docker exec tools_awx_1 tail -f /var/log/supervisor/*
+    
+    # View specific service logs
+    docker exec tools_awx_1 tail -f /var/log/supervisor/awx-web.log
+    docker exec tools_awx_1 tail -f /var/log/supervisor/awx-task.log
+    ```
+  </Accordion>
+  
+  <Accordion title="Restart services">
+    After making code changes, restart AWX services:
+    
+    ```bash
+    docker exec tools_awx_1 supervisorctl restart all
+    
+    # Or restart specific services
+    docker exec tools_awx_1 supervisorctl restart awx-web
+    docker exec tools_awx_1 supervisorctl restart awx-task
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Using docker-compose-test
+
+For more control over the development environment, start the containers without automatically launching services:
+
+```bash
+make docker-compose-test
+```
+
+This drops you into a shell inside the AWX container. Manually bootstrap and start services:
+
+```bash
+# Inside the container
+/usr/bin/bootstrap_development.sh  # Run migrations and setup
+/usr/bin/launch_awx.sh             # Start all services
+```
+
+<Info>
+  `launch_awx.sh` automatically calls `bootstrap_development.sh`, so you can skip the first command if you just want to start services.
+</Info>
+
+## Advanced Configuration
+
+### Cluster Mode
+
+Test AWX in a multi-node cluster configuration:
+
+```bash
+# Start a 3-node control plane cluster
+CONTROL_PLANE_NODE_COUNT=3 make docker-compose
+
+# Start with control and execution nodes
+MAIN_NODE_TYPE=control EXECUTION_NODE_COUNT=2 make docker-compose
+
+# Complex topology
+CONTROL_PLANE_NODE_COUNT=2 EXECUTION_NODE_COUNT=3 make docker-compose
+```
+
+This creates a mesh topology with:
+- Multiple AWX control plane nodes
+- Execution nodes (receptor containers)
+- A hop node connecting execution nodes to control plane
+
+### Detached Mode
+
+Run containers in the background:
+
+```bash
+make docker-compose COMPOSE_UP_OPTS=-d
+```
+
+View logs separately:
+
+```bash
+docker compose -f tools/docker-compose/_sources/docker-compose.yml logs -f
+```
+
+### Custom Image Tag
+
+Use a specific image tag or branch:
+
+```bash
+COMPOSE_TAG=devel make docker-compose
+```
+
+### Disable Color Output
+
+Useful for CI environments:
+
+```bash
+DJANGO_COLORS=nocolor COMPOSE_UP_OPTS="--no-color" SUPERVISOR_ARGS="-n -t" make docker-compose
+```
+
+## Integration Testing
+
+The development environment supports integration with external services for testing:
+
+<Tabs>
+  <Tab title="Splunk">
+    Test external logging with Splunk:
+    
+    ```bash
+    SPLUNK=true make docker-compose
+    ```
+    
+    After containers start, configure AWX to forward logs:
+    
+    ```bash
+    export CONTROLLER_USERNAME=admin
+    export CONTROLLER_PASSWORD=<your-password>
+    ansible-playbook tools/docker-compose/ansible/plumb_splunk.yml
+    ```
+    
+    Access Splunk at `http://localhost:8000` (credentials: `admin/splunk_admin`).
+  </Tab>
+  
+  <Tab title="HashiCorp Vault">
+    Test credential management with Vault:
+    
+    ```bash
+    VAULT=true make docker-compose
+    ```
+    
+    Unseal Vault after starting:
+    
+    ```bash
+    ansible-playbook tools/docker-compose/ansible/unseal_vault.yml
+    ```
+    
+    Configure AWX to use Vault:
+    
+    ```bash
+    export CONTROLLER_USERNAME=admin
+    export CONTROLLER_PASSWORD=<your-password>
+    ansible-playbook tools/docker-compose/ansible/plumb_vault.yml
+    ```
+  </Tab>
+  
+  <Tab title="Prometheus & Grafana">
+    Test metrics collection:
+    
+    ```bash
+    PROMETHEUS=true GRAFANA=true make docker-compose
+    ```
+    
+    Access Grafana at `http://localhost:3001` for AWX metrics dashboards.
+  </Tab>
+  
+  <Tab title="OpenTelemetry & Loki">
+    Test observability stack:
+    
+    ```bash
+    OTEL=true GRAFANA=true LOKI=true PROMETHEUS=true make docker-compose
+    ```
+    
+    AWX logs are exported to Loki via OpenTelemetry Collector and can be viewed in Grafana.
+  </Tab>
+  
+  <Tab title="Minikube">
+    Test container groups with Kubernetes:
+    
+    ```bash
+    # Start minikube first
+    minikube start --cpus=4 --memory=8g --addons=ingress
+    
+    # Start AWX with minikube integration
+    make docker-compose-container-group
+    
+    # Or combine with other options
+    MINIKUBE_CONTAINER_GROUP=true CONTROL_PLANE_NODE_COUNT=2 make docker-compose
+    ```
+  </Tab>
+</Tabs>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Database connection issues">
+    If you see `Waiting for postgres to be ready to accept connections` indefinitely:
+    
+    1. Stop and remove all containers:
+       ```bash
+       docker stop $(docker ps -a -q)
+       docker system prune -a
+       ```
+    
+    2. Remove volumes and networks:
+       ```bash
+       docker volume prune
+       docker network prune
+       ```
+    
+    3. Start fresh:
+       ```bash
+       make docker-compose-build
+       make docker-compose
+       ```
+  </Accordion>
+  
+  <Accordion title="Port conflicts">
+    If port 8043 is already in use, modify the port mapping in `tools/docker-compose/_sources/docker-compose.yml` or stop the conflicting service.
+  </Accordion>
+  
+  <Accordion title="Out of disk space">
+    Docker images and volumes can consume significant disk space. Clean up:
+    
+    ```bash
+    # Remove unused images
+    docker image prune -a
+    
+    # Remove unused volumes
+    docker volume prune
+    
+    # Full cleanup (WARNING: removes all stopped containers, images, volumes)
+    docker system prune -a --volumes
+    ```
+  </Accordion>
+  
+  <Accordion title="UI not loading">
+    If the web interface shows errors:
+    
+    1. Ensure UI is built:
+       ```bash
+       make clean-ui ui
+       ```
+    
+    2. Collect static files:
+       ```bash
+       docker exec tools_awx_1 awx-manage collectstatic --noinput
+       ```
+    
+    3. Restart the web service:
+       ```bash
+       docker exec tools_awx_1 supervisorctl restart awx-web
+       ```
+  </Accordion>
+  
+  <Accordion title="Rebuild after schema changes">
+    If database schema changes after pulling new code:
+    
+    ```bash
+    docker exec tools_awx_1 awx-manage migrate
+    docker exec tools_awx_1 supervisorctl restart all
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Stopping and Cleaning Up
+
+### Stop containers
+
+```bash
+make docker-compose-down
+
+# Or manually
+docker compose -f tools/docker-compose/_sources/docker-compose.yml down
+```
+
+### Remove all AWX data
+
+To completely remove containers, volumes, and networks:
+
+```bash
+docker compose -f tools/docker-compose/_sources/docker-compose.yml down --volumes
+```
+
+<Warning>
+  This deletes all database data, settings, and persistent volumes. You'll need to recreate your admin user and reload any test data.
+</Warning>
+
+### Purge everything
+
+To remove all Docker containers, images, and volumes (if you only have AWX containers):
+
+```bash
+docker stop $(docker ps -a -q)
+docker system prune -a
+docker volume prune
+docker network prune
+```
+
+## Additional Resources
+
+- [Docker Compose README](https://github.com/ansible/awx/blob/devel/tools/docker-compose/README.md)
+- [Contributing to AWX](https://github.com/ansible/awx/blob/devel/CONTRIBUTING.md)
+- [AWX Development Workflow](https://docs.ansible.com/projects/awx/en/latest/contributor/workflow.html)
+- [ansible-ui Development Guide](https://github.com/ansible/ansible-ui/blob/main/CONTRIBUTING.md)
+
+<Note>
+  For questions or issues with the development environment, visit the [Ansible Forum with the AWX tag](https://forum.ansible.com/tag/awx).
+</Note>

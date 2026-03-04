@@ -1,0 +1,392 @@
+---
+title: Organizations and Teams
+description: Learn how to create and manage organizations and teams in AWX for multi-tenancy and access control
+---
+
+Organizations and teams are fundamental to AWX's role-based access control (RBAC) system. Organizations serve as the basic unit of multi-tenancy, while teams group users for collaborative work.
+
+## Understanding Organizations
+
+An **Organization** is the primary unit for dividing resources and permissions in AWX. Each organization can contain:
+
+- Projects
+- Inventories
+- Job Templates
+- Credentials
+- Teams
+- Users
+
+### Organization Roles
+
+AWX provides several built-in roles for organizations:
+
+- **Admin**: Full control over the organization and all its resources
+- **Auditor**: Read-only access to the organization
+- **Member**: Basic participation permissions
+- **Execute**: Can run job templates in the organization
+- **Project Admin**: Manage projects within the organization
+- **Inventory Admin**: Manage inventories within the organization
+- **Credential Admin**: Manage credentials within the organization
+- **Workflow Admin**: Manage workflows within the organization
+- **Job Template Admin**: Manage job templates within the organization
+- **Notification Admin**: Manage notifications within the organization
+
+## Creating an Organization
+
+<Steps>
+
+<Step title="Create via Web UI">
+  Navigate to **Organizations** in the left sidebar and click **Add**. Fill in:
+  - **Name**: Organization name (required)
+  - **Description**: Optional description
+  - **Max Hosts**: Maximum number of hosts (0 = unlimited)
+  - **Default Execution Environment**: Optional default EE for jobs
+  - **Instance Groups**: Assign instance groups for job execution
+</Step>
+
+<Step title="Create via API">
+  Make a POST request to `/api/v2/organizations/`:
+
+  ```bash
+  curl -X POST https://awx.example.com/api/v2/organizations/ \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "Engineering",
+      "description": "Engineering team organization",
+      "max_hosts": 100
+    }'
+  ```
+</Step>
+
+<Step title="Create via Ansible">
+  Use the `awx.awx.organization` module:
+
+  ```yaml
+  - name: Create organization
+    awx.awx.organization:
+      name: Engineering
+      description: Engineering team organization
+      max_hosts: 100
+      state: present
+      controller_host: awx.example.com
+      controller_username: admin
+      controller_password: password
+  ```
+</Step>
+
+</Steps>
+
+## Managing Organization Access
+
+### Assigning Users to Organizations
+
+<Tabs>
+  <Tab title="Web UI">
+    1. Navigate to the organization
+    2. Click the **Users** tab
+    3. Click **Add** and select users
+    4. Assign appropriate roles
+  </Tab>
+
+  <Tab title="API">
+    ```bash
+    # Add user to organization with admin role
+    curl -X POST https://awx.example.com/api/v2/organizations/1/users/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"id": 5}'
+
+    # Grant admin role
+    curl -X POST https://awx.example.com/api/v2/organizations/1/roles/ \
+      -H "Authorization: Bearer YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"user": 5, "role": "admin_role"}'
+    ```
+  </Tab>
+
+  <Tab title="Ansible">
+    ```yaml
+    - name: Grant organization admin role
+      awx.awx.role:
+        user: john.doe
+        target_team: Engineering
+        role: admin
+        state: present
+    ```
+  </Tab>
+</Tabs>
+
+## Understanding Teams
+
+A **Team** is a group of users that work on common projects within an organization. Teams:
+
+- Must belong to exactly one organization
+- Can be granted permissions on resources
+- Inherit organization-level permissions
+- Have unique names within their organization
+
+### Team Roles
+
+- **Admin**: Full control over the team
+- **Member**: Basic team membership
+- **Read**: View-only access to team details
+
+## Creating and Managing Teams
+
+<Steps>
+
+<Step title="Create a Team">
+  <Tabs>
+    <Tab title="Web UI">
+      1. Navigate to **Organizations** → Select your organization
+      2. Click the **Teams** tab
+      3. Click **Add**
+      4. Enter team name and description
+      5. Click **Save**
+    </Tab>
+
+    <Tab title="API">
+      ```bash
+      curl -X POST https://awx.example.com/api/v2/teams/ \
+        -H "Authorization: Bearer YOUR_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "name": "DevOps Team",
+          "description": "DevOps engineering team",
+          "organization": 1
+        }'
+      ```
+    </Tab>
+
+    <Tab title="Ansible">
+      ```yaml
+      - name: Create a team
+        awx.awx.team:
+          name: DevOps Team
+          description: DevOps engineering team
+          organization: Engineering
+          state: present
+      ```
+    </Tab>
+  </Tabs>
+</Step>
+
+<Step title="Add Users to Team">
+  <Tabs>
+    <Tab title="Web UI">
+      1. Navigate to the team
+      2. Click the **Users** tab
+      3. Click **Add** and select users
+      4. Assign member or admin roles
+    </Tab>
+
+    <Tab title="API">
+      ```bash
+      # Add user to team
+      curl -X POST https://awx.example.com/api/v2/teams/1/users/ \
+        -H "Authorization: Bearer YOUR_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"id": 5}'
+      ```
+    </Tab>
+
+    <Tab title="Ansible">
+      ```yaml
+      - name: Add user to team
+        awx.awx.role:
+          user: john.doe
+          target_team: DevOps Team
+          role: member
+          state: present
+      ```
+    </Tab>
+  </Tabs>
+</Step>
+
+<Step title="Grant Team Permissions">
+  Teams can be granted permissions on various resources:
+
+  ```yaml
+  - name: Grant team access to inventory
+    awx.awx.role:
+      team: DevOps Team
+      inventory: Production
+      role: use
+      state: present
+
+  - name: Grant team access to job template
+    awx.awx.role:
+      team: DevOps Team
+      job_template: Deploy Application
+      role: execute
+      state: present
+  ```
+</Step>
+
+</Steps>
+
+## Permission Inheritance
+
+Permissions flow through the organization hierarchy:
+
+```
+Organization Admin
+  ↓
+Team Admin (inherits org permissions)
+  ↓
+Team Member (inherits team permissions)
+  ↓
+Resource Permissions (explicit grants)
+```
+
+### Example Permission Flow
+
+1. **Organization Admin** can manage all resources in the organization
+2. **Team Members** inherit organization-level permissions
+3. **Explicit Resource Permissions** can be granted to teams for specific inventories, projects, or job templates
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Organize by Function" icon="sitemap">
+    Create organizations based on business units or functions (e.g., Engineering, Operations, QA)
+  </Card>
+
+  <Card title="Use Teams for Projects" icon="users">
+    Create teams for specific projects or workstreams within an organization
+  </Card>
+
+  <Card title="Principle of Least Privilege" icon="shield-halved">
+    Grant only the minimum permissions necessary for users to perform their tasks
+  </Card>
+
+  <Card title="Regular Audits" icon="magnifying-glass">
+    Periodically review organization and team memberships to ensure they're up to date
+  </Card>
+</CardGroup>
+
+## Common Use Cases
+
+### Multi-Environment Setup
+
+```yaml
+# Organization for each environment
+- name: Create environments
+  awx.awx.organization:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - Development
+    - Staging
+    - Production
+
+# Teams within each environment
+- name: Create environment teams
+  awx.awx.team:
+    name: "{{ item.team }}"
+    organization: "{{ item.org }}"
+    state: present
+  loop:
+    - { org: Development, team: Dev Team }
+    - { org: Production, team: Ops Team }
+```
+
+### Department-Based Organizations
+
+```yaml
+- name: Create department organizations
+  awx.awx.organization:
+    name: "{{ item }}"
+    max_hosts: 500
+    state: present
+  loop:
+    - Engineering
+    - Marketing
+    - Finance
+
+- name: Create functional teams
+  awx.awx.team:
+    name: "{{ item.name }}"
+    organization: "{{ item.org }}"
+    state: present
+  loop:
+    - { name: Backend Team, org: Engineering }
+    - { name: Frontend Team, org: Engineering }
+    - { name: Infrastructure Team, org: Engineering }
+```
+
+## Viewing Organization Resources
+
+List all resources in an organization via API:
+
+```bash
+# List organization projects
+curl https://awx.example.com/api/v2/organizations/1/projects/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# List organization inventories
+curl https://awx.example.com/api/v2/organizations/1/inventories/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# List organization teams
+curl https://awx.example.com/api/v2/organizations/1/teams/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# List organization users
+curl https://awx.example.com/api/v2/organizations/1/users/ \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Users can't see organization resources">
+    Ensure users have been added to the organization with appropriate roles. Check:
+    - User has organization member or higher role
+    - User's team has permissions on the resource
+    - Resource is in the correct organization
+  </Accordion>
+
+  <Accordion title="Can't create resources in organization">
+    Verify the user has admin permissions:
+    ```bash
+    # Check user's organization roles
+    curl https://awx.example.com/api/v2/users/5/roles/ \
+      -H "Authorization: Bearer YOUR_TOKEN" | \
+      jq '.results[] | select(.summary_fields.resource_type == "organization")'
+    ```
+  </Accordion>
+
+  <Accordion title="Team members can't execute job templates">
+    Grant the team execute permission on the job template or ensure the team has organization execute role:
+    ```yaml
+    - name: Grant team execute access
+      awx.awx.role:
+        team: DevOps Team
+        job_template: My Job
+        role: execute
+        state: present
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="RBAC Documentation" icon="lock" href="/api/overview">
+    Learn more about AWX's role-based access control system
+  </Card>
+  
+  <Card title="Creating Projects" icon="folder-tree" href="/guides/creating-projects">
+    Create projects within your organization
+  </Card>
+  
+  <Card title="Managing Inventories" icon="server" href="/guides/managing-inventories">
+    Set up inventories for your teams
+  </Card>
+  
+  <Card title="User Management" icon="user" href="/api/overview">
+    API reference for user management
+  </Card>
+</CardGroup>

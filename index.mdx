@@ -1,97 +1,294 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: AWX Documentation
+mode: custom
 ---
 
-## Setting up
+<div className="relative overflow-hidden bg-gradient-to-br from-[#1c1434] via-[#2a1f4d] to-[#1c1434] dark:from-[#0f1117] dark:via-[#1a1d27] dark:to-[#0f1117] py-20">
+  <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxwYXRoIGQ9Ik0zNiAxOGMzLjMxNCAwIDYgMi42ODYgNiA2cy0yLjY4NiA2LTYgNi02LTIuNjg2LTYtNiAyLjY4Ni02IDYtNiIgc3Ryb2tlPSIjZjQxYzdjIiBzdHJva2Utd2lkdGg9IjAuNSIgb3BhY2l0eT0iMC4xIi8+PC9nPjwvc3ZnPg==')] opacity-20"></div>
+  <div className="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-10">
+    <div className="grid lg:grid-cols-12 gap-12 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-5xl sm:text-6xl font-bold text-white mb-6 leading-tight">
+          Ansible automation <span className="text-[#f41c7c]">made simple</span>
+        </h1>
+        <p className="text-xl text-gray-300 dark:text-gray-400 mb-8 max-w-2xl">
+          AWX provides a web-based user interface, REST API, and task engine built on top of Ansible. Manage inventories, launch playbooks, and monitor job execution—all from a modern, intuitive platform.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a
+            href="/getting-started"
+            className="inline-flex items-center px-6 py-3 rounded-lg bg-[#f41c7c] hover:bg-[#fc7cbc] text-white font-semibold transition-colors no-underline"
+          >
+            Get Started
+            <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          <a
+            href="/api/overview"
+            className="inline-flex items-center px-6 py-3 rounded-lg border-2 border-white/30 bg-white/10 hover:bg-white/20 text-white font-semibold transition-colors no-underline"
+          >
+            Explore API
+          </a>
+        </div>
+      </div>
+      <div className="lg:col-span-5 hidden lg:block">
+        <div className="relative">
+          <div className="absolute inset-0 bg-[#f41c7c]/20 blur-3xl rounded-full"></div>
+          <img
+            src="https://media.brand.dev/99afb4b8-4331-498b-aff4-43ebcee1882e.svg"
+            alt="AWX Platform"
+            className="relative w-full h-auto max-w-md mx-auto"
+            noZoom
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Quick start</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Get AWX up and running in minutes. Follow these steps to deploy AWX and run your first Ansible job.
+  </p>
+  
+  <Steps>
+    <Step title="Install AWX with the AWX Operator">
+      The recommended way to deploy AWX is using the AWX Operator on Kubernetes. This provides a scalable, production-ready installation.
+      
+      ```bash
+      # Add the AWX Operator to your Kubernetes cluster
+      kubectl apply -f https://raw.githubusercontent.com/ansible/awx-operator/devel/deploy/awx-operator.yaml
+      ```
+      
+      For detailed installation instructions, see the [Installation Guide](/installation/awx-operator).
+    </Step>
+    
+    <Step title="Create your first organization and project">
+      Once AWX is running, log in to the web interface and create an organization to contain your automation resources. Then add a project that points to your Ansible playbook repository.
+      
+      ```bash
+      # Or use the CLI to create resources
+      awx organizations create --name "My Organization"
+      awx projects create --name "My Project" \
+        --organization "My Organization" \
+        --scm_type git \
+        --scm_url "https://github.com/your-org/playbooks.git"
+      ```
+      
+      Learn more about [Organizations and Projects](/guides/creating-projects).
+    </Step>
+    
+    <Step title="Configure an inventory and credentials">
+      Add the hosts you want to manage by creating an inventory, and set up credentials for AWX to authenticate with your infrastructure.
+      
+      You can manage inventories through the web UI or via API:
+      
+      ```bash
+      # Create an inventory
+      awx inventory create --name "Production" --organization "My Organization"
+      
+      # Add hosts
+      awx hosts create --name "web-server-01" --inventory "Production"
+      ```
+      
+      See the [Inventory Management Guide](/guides/managing-inventories) for more details.
+    </Step>
+    
+    <Step title="Launch a job template">
+      Create a job template that combines your project, inventory, and playbook. Then launch it to execute your Ansible automation.
+      
+      ```bash
+      # Launch a job template via CLI
+      awx job_templates launch "Deploy Application" --monitor
+      ```
+      
+      You can watch the job output stream in real-time through the web interface or CLI. Check out the [Running Jobs Guide](/guides/running-jobs) to learn more.
+    </Step>
+  </Steps>
+</div>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Explore by topic</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Everything you need to master AWX, from core concepts to advanced workflows.
+  </p>
+  
+  <CardGroup cols={3}>
     <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+      title="Core concepts"
+      icon="book-open"
+      href="/concepts/projects"
+    >
+      Learn about projects, inventories, credentials, and job templates—the building blocks of AWX automation.
+    </Card>
+    <Card
+      title="User guide"
+      icon="user"
+      href="/guides/organizations-and-teams"
+    >
+      Step-by-step guides for organizing teams, running jobs, scheduling automation, and configuring notifications.
+    </Card>
+    <Card
+      title="Workflows"
+      icon="diagram-project"
+      href="/advanced/workflows"
+    >
+      Orchestrate complex automation by chaining multiple jobs together with conditional logic and approval steps.
+    </Card>
+    <Card
+      title="RBAC"
+      icon="shield"
+      href="/advanced/rbac"
+    >
+      Control who can view, edit, and execute automation resources with granular role-based access control.
+    </Card>
+    <Card
+      title="API reference"
+      icon="code"
+      href="/api/overview"
+    >
+      Integrate AWX into your workflows with the comprehensive REST API. Includes authentication, pagination, and filtering.
+    </Card>
+    <Card
+      title="CLI tools"
+      icon="terminal"
+      href="/cli/installation"
+    >
+      Install and use the awx command-line tool to manage AWX resources from your terminal.
+    </Card>
+  </CardGroup>
+</div>
 
-## Create beautiful pages
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Key features</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Powerful capabilities to scale your Ansible automation across teams and infrastructure.
+  </p>
+  
+  <div className="grid md:grid-cols-2 gap-6">
+    <div className="p-6 rounded-xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#1a1d27]">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#f41c7c]/10 dark:bg-[#f41c7c]/20 flex items-center justify-center">
+          <svg className="w-5 h-5 text-[#f41c7c]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Job scheduling</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Schedule automation to run at specific times or on recurring intervals. Set up maintenance windows and coordinate deployments.
+          </p>
+        </div>
+      </div>
+    </div>
+    
+    <div className="p-6 rounded-xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#1a1d27]">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#f41c7c]/10 dark:bg-[#f41c7c]/20 flex items-center justify-center">
+          <svg className="w-5 h-5 text-[#f41c7c]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Credential management</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Securely store and manage SSH keys, API tokens, and passwords. Integrate with external secret managers like HashiCorp Vault.
+          </p>
+        </div>
+      </div>
+    </div>
+    
+    <div className="p-6 rounded-xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#1a1d27]">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#f41c7c]/10 dark:bg-[#f41c7c]/20 flex items-center justify-center">
+          <svg className="w-5 h-5 text-[#f41c7c]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Real-time monitoring</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Stream job output in real-time as playbooks execute. View detailed task results, timing information, and host status.
+          </p>
+        </div>
+      </div>
+    </div>
+    
+    <div className="p-6 rounded-xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#1a1d27]">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#f41c7c]/10 dark:bg-[#f41c7c]/20 flex items-center justify-center">
+          <svg className="w-5 h-5 text-[#f41c7c]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Dynamic inventories</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Sync inventories from cloud providers, virtualization platforms, and CMDB systems. Keep your infrastructure data up to date automatically.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-Everything you need to create world-class documentation.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Resources</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Additional resources to help you succeed with AWX.
+  </p>
+  
+  <CardGroup cols={2}>
+    <Card
+      title="Installation guides"
+      icon="download"
+      href="/installation/overview"
+    >
+      Deploy AWX with the AWX Operator on Kubernetes or use Docker Compose for development environments.
+    </Card>
+    <Card
+      title="Architecture overview"
+      icon="sitemap"
+      href="/architecture"
+    >
+      Understand how AWX components work together, from the web frontend to the task execution engine.
+    </Card>
+    <Card
+      title="Contributing guide"
+      icon="code-branch"
+      href="/development/contributing"
+    >
+      Learn how to contribute to AWX, set up your development environment, and submit pull requests.
+    </Card>
+    <Card
+      title="Community forum"
+      icon="comments"
+      href="https://forum.ansible.com/tag/awx"
+      cta="Visit forum"
+    >
+      Join the AWX community to ask questions, share knowledge, and connect with other users.
+    </Card>
+  </CardGroup>
+</div>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="p-10 rounded-2xl border-2 border-[#f41c7c]/30 bg-gradient-to-br from-[#f41c7c]/5 to-[#fc7cbc]/5 dark:from-[#f41c7c]/10 dark:to-[#fc7cbc]/10 text-center">
+    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
+      Ready to automate your infrastructure?
+    </h2>
+    <p className="text-lg text-gray-600 dark:text-gray-400 mb-8 max-w-2xl mx-auto">
+      Get started with AWX today and bring the power of Ansible automation to your entire team.
+    </p>
+    <a
+      href="/getting-started"
+      className="inline-flex items-center px-8 py-3 rounded-lg bg-[#f41c7c] hover:bg-[#fc7cbc] text-white font-semibold transition-colors no-underline"
+    >
+      Start now
+      <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+      </svg>
+    </a>
+  </div>
+</div>

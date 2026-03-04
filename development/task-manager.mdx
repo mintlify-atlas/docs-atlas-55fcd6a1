@@ -1,0 +1,484 @@
+---
+title: Task Manager System
+description: Detailed overview of AWX's task management and scheduling system
+---
+
+The task management system is responsible for deciding when tasks should be scheduled to run. It considers creation time, job dependencies, and capacity when choosing tasks to execute.
+
+## System Components
+
+The task management system consists of three separate components:
+
+1. **Dependency Manager**
+2. **Task Manager**
+3. **Workflow Manager**
+
+Each runs in a separate dispatched task and can run concurrently with one another.
+
+## Scheduling Considerations
+
+When choosing a task to run, the system considers:
+
+1. **Creation time**: Earlier tasks are prioritized
+2. **Job dependencies**: Dependent tasks wait for prerequisites
+3. **Capacity**: Available resources on execution nodes
+
+Independent tasks run in order of creation time, earliest first. Tasks with dependencies also run in creation time order within their dependency group.
+
+## Dependency Manager
+
+### Purpose
+
+Responsible for looking at each pending task and determining whether it should create a dependency for that task.
+
+### Example: Update on Launch
+
+If `scm_update_on_launch` is enabled for a project, a project update will be created as a dependency when a job using that project is launched.
+
+### Dependency Chain
+
+Dependencies can have their own dependencies:
+
+```
+┌───────────┐
+│           │  Created by web API call
+│   Job A   │
+│           │
+└──────┬────┘
+       │
+       │
+       ▼
+┌───────────────┐
+│  Inventory    │  Dependency of Job A
+│  Source       │  Created by Dependency Manager
+│  Update B     │
+└───────┬────────┘
+       │
+       │
+       ▼
+┌───────────────┐
+│   Project     │  Dependency of Inventory Source Update B
+│   Update C    │  Created by Dependency Manager
+└───────────────┘
+```
+
+### Dependency Manager Steps
+
+1. **Get pending tasks** (parent tasks) that have `dependencies_processed = False`
+
+2. **Cache related objects** as optimization:
+   - Related projects
+   - Related inventory sources
+
+3. **Create dependencies** when needed:
+   - Project or inventory update not already created
+   - Last update failed
+   - Last update outside cache timeout window
+   - Additional logic for inventory updates
+
+4. **Link dependencies** to parent task:
+   - Use `dependent_jobs` field
+   - Allows canceling parent if dependency fails
+
+5. **Mark dependencies processed**:
+   - Update parent tasks with `dependencies_processed = True`
+
+6. **Check nested dependencies**:
+   - Inventory source updates can have project update dependencies
+
+### Update on Launch Logic
+
+Projects and inventory sources marked as "update on launch" trigger updates when related job templates are launched.
+
+**Rules:**
+- Update triggered when related job template is launched
+- Update **not** triggered if:
+  - Recent update exists
+  - Last update finished successfully
+  - Finished time within configured cache window
+- Failed updates always trigger new update
+- `update on launch` jobs have `launch_type` of `dependent`
+- If dependent job fails, related jobs also fail
+
+## Task Manager
+
+### Purpose
+
+Responsible for looking at each pending task and determining whether Task Manager can start that task.
+
+### Task Manager Steps
+
+1. **Get tasks** that have `dependencies_processed = True`:
+   - Pending tasks
+   - Waiting tasks
+   - Running tasks
+
+2. **Process running tasks first**:
+   - Build dependency graph
+   - Account for currently consumed capacity
+   - Track capacity in-memory:
+     - `TaskManagerInstances`: Instance capacity tracking
+     - `TaskManagerInstanceGroups`: Group capacity tracking
+
+3. **For each pending task**:
+   - Check if total tasks started this cycle > `start_task_limit`
+   - Check if task has timed out
+   - Check if task is blocked (by dependencies or concurrency rules)
+   - Check if preferred instances have enough capacity
+
+4. **Start the task**:
+   - Change status to `waiting`
+   - Submit task to dispatcher (via pg_notify)
+
+### Blocking Logic
+
+**Hard blocking**: Database-backed via `dependent_jobs` field
+- Job A will not run if any of its `dependent_jobs` are still running
+- Represented in database
+
+**Soft blocking**: In-memory tracking in Task Manager
+- No database representation
+- Example: Job A and Job B based on same template with `allow_simultaneous` disabled
+- Job B blocked if Job A is running
+- Determined via Dependency Graph
+
+### Task Manager Rules
+
+<Warning>
+These rules are strictly enforced by the Task Manager:
+</Warning>
+
+- Groups of blocked tasks run in chronological order
+- Tasks run when capacity available (one job always allowed per instance group)
+- Only one Project Update per Project at a time
+- Only one Inventory Update per Inventory Source at a time
+- Only one Job per Job Template at a time (unless `allow_simultaneous` is enabled)
+- Only one System Job at a time
+
+### Node Affinity Decider
+
+The Task Manager decides which exact node a job will run on.
+
+**Decision process:**
+1. Construct set of groups where job can run
+2. Consider user-configured group execution policy
+3. Consider user-configured capacity
+4. Traverse groups to find suitable node
+
+**Node selection:**
+- **First choice**: Node with largest remaining capacity that can fit the job
+- **Fallback**: Largest *idle* node, even if job exceeds capacity
+- This allows instances to exceed capacity limits when necessary
+
+## Workflow Manager
+
+### Purpose
+
+Responsible for looking at each workflow job and determining if the next node can run.
+
+### Workflow Manager Steps
+
+1. **Get all running workflow jobs**
+
+2. **Build workflow DAG** for each workflow job:
+   - Directed Acyclic Graph of workflow nodes
+   - Represents workflow structure
+
+3. **For each workflow job**:
+   - Check if timed out
+   - Check if next node can start based on:
+     - Previous node status
+     - Success/failure/always logic
+     - Convergence rules
+
+4. **Create and start new tasks**:
+   - Create task for next workflow node
+   - Signal start
+
+### Workflow Execution
+
+Workflows execute based on node relationships:
+
+```python
+# Example workflow
+Node 1 (Job Template A)
+  │
+  ├── on_success ──► Node 2 (Job Template B)
+  │
+  └── on_failure ──► Node 3 (Job Template C)
+
+Node 2
+  │
+  └── always ─────► Node 4 (Job Template D)
+```
+
+## System Architecture
+
+### Entry Point: schedule()
+
+Each manager has a single entry point: `schedule()`.
+
+**Locking mechanism:**
+```python
+def schedule():
+    # Try to acquire global lock
+    lock = acquire_lock('task_manager')
+    if not lock:
+        return  # Another instance is running
+    
+    try:
+        # Process tasks
+        process_pending_tasks()
+    finally:
+        release_lock(lock)
+```
+
+- Attempts to acquire single, global lock in database
+- If lock cannot be acquired, method returns
+- Lock indicates another instance is currently running
+
+### Atomic Transactions
+
+Each manager runs inside an atomic DB transaction:
+
+```python
+with transaction.atomic():
+    schedule()
+```
+
+**Benefits:**
+- If dispatcher task is killed, no partial updates
+- All-or-nothing execution
+- Consistency guaranteed
+
+### Hybrid Scheduler: Periodic + Event
+
+Managers run in two ways:
+
+**a) Periodically**: Background task (every 30 seconds by default)
+
+**b) Event-triggered**: On job creation or completion
+
+<Note>
+Workflow Manager doesn't run directly on a schedule - it piggy-backs off Task Manager. If Task Manager sees running workflow jobs, it schedules Workflow Manager.
+</Note>
+
+**Why both mechanisms?**
+1. **Reduces latency**: Jobs start faster with event-triggered execution
+2. **Fail-safe**: Periodic execution catches missed events
+3. **Resilience**: System progresses even if events are missed
+
+### Bulk Reschedule
+
+Utility classes prevent scheduling too many managers:
+
+```python
+with transaction.atomic():
+    for t in tasks:
+        if condition:
+            ScheduleTaskManager.schedule()
+```
+
+`ScheduleTaskManager.schedule()` ensures only one Task Manager is scheduled after all tasks are processed, not one per task.
+
+### Timing Out
+
+Because of the global lock, only one manager can run at a time.
+
+**Timeout protection:**
+- Parent dispatcher process will SIGKILL stuck managers
+- Timeout after a few minutes
+- Allows new manager to take over
+
+**Side effect mitigation:**
+- Manager runs in transaction, so SIGKILL rolls back changes
+- Next run re-processes same tasks
+- **Risk**: Manager never progresses (times out every cycle)
+- **Solution**: Manager checks time and bails out early if near timeout
+- Commits partial progress before timeout
+- Next cycle continues from where previous left off
+
+## Job Lifecycle Detail
+
+### Status Transitions
+
+```
+   API Request
+       │
+       ▼
+   [pending] ───────────┐
+       │                  │
+       │   Dependency     │
+       │   Manager        │
+       │                  │
+       ▼                  │
+[dependencies_processed]  │
+       │                  │
+       │   Task           │
+       │   Manager        │
+       │                  │
+       ▼                  │
+   [waiting]              │
+       │                  │
+       │   Dispatcher     │
+       │                  │
+       ▼                  │
+   [running]              │
+       │                  │
+       │   Job            │  blocked/
+       │   Execution      │  no capacity/
+       │                  │  dependencies
+       ▼                  │
+ [successful/failed] ◄───┘
+    /error/canceled
+```
+
+### Status Meanings
+
+| Status | State |
+|--------|-------|
+| **pending** | Job launched, but:<br/>1. Not yet seen by scheduler<br/>2. Blocked by another task<br/>3. Not enough capacity |
+| **waiting** | Job submitted to dispatcher via pg_notify |
+| **running** | Job is running on an AWX node |
+| **successful** | Job finished with return code 0 |
+| **failed** | Job finished with return code ≠ 0 |
+| **error** | System failure |
+| **canceled** | Manually canceled by user |
+
+## Capacity Calculation
+
+### Instance Capacity
+
+Each instance has:
+- **Total capacity**: Configured or calculated from resources
+- **Consumed capacity**: Sum of running job impacts
+- **Remaining capacity**: Total - Consumed
+
+### Job Impact
+
+Jobs consume capacity based on:
+- **Forks**: Higher forks = higher impact
+- **Job type**: Some jobs have fixed impact (e.g., system jobs = 5)
+
+```python
+# Example capacity calculation
+instance_capacity = 100
+job_forks = 5
+job_impact = calculate_impact(job_forks)  # Returns capacity consumption
+
+if instance_capacity - consumed >= job_impact:
+    # Job can run
+    can_run = True
+else:
+    # Job must wait
+    can_run = False
+```
+
+### Special Capacity Rule
+
+<Warning>
+One job is always allowed to run per instance group, even if there isn't enough capacity. This prevents the system from becoming completely blocked.
+</Warning>
+
+## Managers Are Short-Lived
+
+Manager instances are ephemeral:
+
+1. **Created**: New instance on each run
+2. **Load data**: Pull relevant data from database
+3. **Process**: Execute scheduling logic
+4. **Cleanup**: Instance destroyed
+
+**Benefits:**
+- No stale state
+- Fresh data every cycle
+- No memory leaks from long-running processes
+
+## Debugging the Task Manager
+
+### Checking Task Status
+
+```python
+# In Django shell
+from awx.main.models import UnifiedJob
+
+# Find pending jobs
+pending = UnifiedJob.objects.filter(status='pending')
+for job in pending:
+    print(f"Job {job.id}: {job.name}")
+    print(f"  Dependencies processed: {job.dependencies_processed}")
+    print(f"  Dependent jobs: {list(job.dependent_jobs.all())}")
+```
+
+### Forcing Task Manager Run
+
+```python
+# Trigger task manager
+from awx.main.scheduler.tasks import run_task_manager
+run_task_manager.apply_async()
+```
+
+### Checking Capacity
+
+```python
+from awx.main.models import Instance
+
+for instance in Instance.objects.all():
+    print(f"{instance.hostname}:")
+    print(f"  Capacity: {instance.capacity}")
+    print(f"  Consumed capacity: {instance.consumed_capacity}")
+    print(f"  Remaining: {instance.capacity - instance.consumed_capacity}")
+```
+
+### Common Issues
+
+**Jobs stuck in pending:**
+- Check if dependencies are satisfied
+- Check capacity on instance groups
+- Check for blocking jobs (concurrent jobs disabled)
+- Verify task manager is running
+
+**Jobs not starting:**
+- Check dispatcher is running: `awx-manage dispatcherctl status`
+- Check for errors in logs: `/var/log/tower/`
+- Verify database connectivity
+
+## Performance Tuning
+
+### start_task_limit
+
+Limits tasks started per Task Manager cycle:
+
+```python
+# In settings
+START_TASK_LIMIT = 100  # Default
+```
+
+Higher values = more tasks start per cycle, but longer cycle time.
+
+### Task Manager Period
+
+How often Task Manager runs:
+
+```python
+# Celery beat configuration
+SCHEDULE = {
+    'run_task_manager': {
+        'task': 'awx.main.scheduler.tasks.run_task_manager',
+        'schedule': timedelta(seconds=30),  # Adjust as needed
+    }
+}
+```
+
+### Database Indexes
+
+Ensure indexes exist on:
+- `status` field
+- `dependencies_processed` field
+- `created` timestamp
+
+## Next Steps
+
+- [Dispatcher System](/development/dispatcher)
+- [Ansible Integration](/development/ansible-integration)
+- [Architecture Overview](/development/architecture-overview)
