@@ -1,0 +1,212 @@
+{
+  "projectType": "saas",
+  "projectName": "AWX",
+  "projectDescription": "Web-based user interface, REST API, and task engine built on top of Ansible for automation management",
+  "theme": "aspen",
+  "primaryColor": "#f41c7c",
+  "lightColor": "#1c1434",
+  "darkColor": "#fc7cbc",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "getting-started",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Installation",
+            "pages": [
+              "installation/overview",
+              "installation/awx-operator",
+              "installation/docker-compose",
+              "installation/requirements"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/projects",
+              "concepts/inventories",
+              "concepts/job-templates",
+              "concepts/credentials",
+              "concepts/workflows",
+              "concepts/execution-environments"
+            ]
+          },
+          {
+            "group": "User Guide",
+            "pages": [
+              "guides/organizations-and-teams",
+              "guides/creating-projects",
+              "guides/managing-inventories",
+              "guides/running-jobs",
+              "guides/scheduling",
+              "guides/notifications",
+              "guides/surveys"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "advanced/workflows",
+              "advanced/rbac",
+              "advanced/container-groups",
+              "advanced/clustering",
+              "advanced/fact-caching",
+              "advanced/webhooks"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/overview",
+              "integrations/source-control",
+              "integrations/cloud-providers",
+              "integrations/logging",
+              "integrations/notifications"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "admin/configuration",
+              "admin/capacity",
+              "admin/metrics",
+              "admin/backup-restore",
+              "admin/security"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "api/overview",
+              "api/authentication",
+              "api/pagination",
+              "api/filtering"
+            ]
+          },
+          {
+            "group": "Core Resources",
+            "pages": [
+              "api/organizations",
+              "api/teams",
+              "api/users",
+              "api/projects",
+              "api/inventories",
+              "api/credentials"
+            ]
+          },
+          {
+            "group": "Job Management",
+            "pages": [
+              "api/job-templates",
+              "api/jobs",
+              "api/workflow-job-templates",
+              "api/workflow-jobs",
+              "api/schedules"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "api/activity-stream",
+              "api/notifications",
+              "api/bulk-api",
+              "api/websockets"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI",
+        "groups": [
+          {
+            "group": "AWX CLI",
+            "pages": [
+              "cli/installation",
+              "cli/configuration",
+              "cli/usage",
+              "cli/commands"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Development",
+        "groups": [
+          {
+            "group": "Contributing",
+            "pages": [
+              "development/contributing",
+              "development/setup",
+              "development/building",
+              "development/testing"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "development/architecture-overview",
+              "development/task-manager",
+              "development/dispatcher",
+              "development/ansible-integration"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Web-based UI for managing Ansible automation",
+    "RESTful API for programmatic access",
+    "Job scheduling and execution",
+    "Workflow orchestration",
+    "Role-based access control (RBAC)",
+    "Inventory management with dynamic sources",
+    "Credential management and encryption",
+    "Real-time job output streaming",
+    "Notification integrations",
+    "Multi-cluster deployment support",
+    "Execution environments with container support",
+    "Activity stream and audit logging"
+  ],
+  "publicApiSurface": [
+    "GET /api/v2/",
+    "GET /api/v2/ping/",
+    "GET /api/v2/organizations/",
+    "GET /api/v2/users/",
+    "GET /api/v2/teams/",
+    "GET /api/v2/projects/",
+    "GET /api/v2/inventories/",
+    "GET /api/v2/hosts/",
+    "GET /api/v2/groups/",
+    "GET /api/v2/credentials/",
+    "GET /api/v2/credential_types/",
+    "GET /api/v2/job_templates/",
+    "POST /api/v2/job_templates/{id}/launch/",
+    "GET /api/v2/jobs/",
+    "GET /api/v2/jobs/{id}/job_events/",
+    "GET /api/v2/workflow_job_templates/",
+    "POST /api/v2/workflow_job_templates/{id}/launch/",
+    "GET /api/v2/workflow_jobs/",
+    "GET /api/v2/schedules/",
+    "GET /api/v2/activity_stream/",
+    "GET /api/v2/notification_templates/",
+    "GET /api/v2/execution_environments/",
+    "GET /api/v2/instance_groups/",
+    "awx login",
+    "awx projects list",
+    "awx job_templates launch"
+  ]
+}
